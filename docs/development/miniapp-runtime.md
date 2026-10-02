@@ -112,7 +112,34 @@ print / warn / pcall / xpcall / setmetatable
 - 蜂鸣：TTS/闹钟播放期间跳过；队列满时丢弃新蜂鸣，不阻塞、不退出。
 - 超预算、堆耗尽、回调异常 → 终止该实例；**安装/替换失败时保留仍在运行的旧实例**。
 
-## 6. 从 Lua 拿到的真实额度
+## 6. 网络：小应用直接用设备已经配好的网
+
+**结论（已在真机 3.0.2 上实测）：小应用不需要单独配网，它直接复用主程序（固件）现有的网络连接。**
+主程序连上 WiFi 后，小应用的 `http.*` 就能出网；主程序没网时，请求返回 `network_error` / `unavailable`——
+不会报“未配网”，也没有给小应用的单独配网流程。
+
+实现层面（固件源码依据）：小应用的 HTTP 不是走语音/云会话，而是另起一个任务
+（`miniapp_http_task`），调用 SDK 的 HTTP 客户端（`arcs-sdk/modules/httpclient`，
+`HTTPClientOpenRequest` / `HTTPClientSendRequest` / `HTTPClientRecvResponse`），
+和固件其他联网功能（OTA 下载等）共用同一张网卡与协议栈。因此：
+
+- 不需要处于语音交互中，也不需要云端会话；小应用被 adb 推上去后就能发请求。
+- HTTPS 走固件的 TLS 配置（接口不保证服务器证书校验），不是浏览器级安全。
+- 并发、超时、响应大小上限见第 4.3 节；超出上限拿不到部分内容，而是直接报错。
+
+实测证据（2026-10-02，设备固件 3.0.2-5f2bb183，adb 推送的 `local:netprobe`）：
+
+| 请求 | 结果 |
+|---|---|
+| `http://www.baidu.com/robots.txt` | `status 200, body 2814 bytes` |
+| `https://www.baidu.com/robots.txt` | `status 200, body 2814 bytes` |
+
+> 实测踩到的坑：第一次探针把 `max_response_bytes` 设成 2048，百度首页比它大，
+> 两次请求都返回 `err:response_too_large`（说明网络其实是通的，只是上限设小了）。
+> **写网络代码时要么不传 `max_response_bytes`（默认 8192），要么按目标响应大小显式给值；
+> 报 `response_too_large` 时不要当成断网。**
+
+## 7. 从 Lua 拿到的真实额度
 
 不要在代码里硬写上面这些数字来判断"能不能用"。运行时应按能力接口自检：
 
@@ -127,7 +154,7 @@ end
 返回 `schema_version` / `firmware_info` / `hardware` / `runtime.lua_sdk`；模拟器里可以在
 「设置 → 高级」查看和编辑同结构的 `capabilities` JSON。
 
-## 7. 设备侧安装协议（给云端/平台用，不是开发者手动调的）
+## 8. 设备侧安装协议（给云端/平台用，不是开发者手动调的）
 
 | MCP 工具 | 参数 | 说明 |
 |---|---|---|
