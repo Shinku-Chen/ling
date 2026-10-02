@@ -1,0 +1,19 @@
+# 构建产物
+dist/
+
+# 本机工具（adb / 模拟器副本等，不提交）
+.tools/
+
+# 编辑器与 IDE
+.idea/
+.vscode/*
+!.vscode/settings.json
+*.suo
+
+# 临时文件
+*.tmp
+*.log
+_site/
+
+# 本地草稿（未定稿的实验，不提交）
+scratch/
