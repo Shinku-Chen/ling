@@ -29,6 +29,9 @@
 | 上传到设备 / 拉回源码 / 看日志 | `docs/development/dev-loop.md` |
 | 环境从零搭起（SDK、adb、ling CLI） | `docs/development/environment-setup.md` |
 | 云端下发 / 上架 / 发布相关 | `docs/development/cloud-distribution.md`（含明确的边界与未知项） |
+| 烧录固件、刷分区、救砖、恢复出厂 | `docs/development/flashing-and-recovery.md` |
+| 设备黑屏 / ADB 掉线 / 反复重启 | `docs/reference/device-behavior-log.md`（先排查休眠，再查 USB 链路） |
+| 收音机 / 音频播放相关开发 | `docs/development/radio-native-plan.md` |
 | 涉及引脚、屏幕、按键、内存、SoC 能力 | `docs/hardware/board-arcs-mini.md` |
 | 想知道外部权威资料在哪 | `docs/reference/README.md` |
 | AI 协作方式与交付要求 | `docs/development/ai-guide.md` |
@@ -56,3 +59,4 @@ Unverified: 还需真机/人工确认的项（例如实际按键手感、蜂鸣�
 ## 变更记录
 
 - 2026-10-02：建立仓库文档骨架与 Lua 小应用基础框架（多文件源码 + 合并/校验/上传工具），依据 LingClaw-SDK 0.1.0 与 Arcs-mini 固件 3.0.2。
+- 2026-10-02：补充烧录/恢复手册、设备行为实测记录（黑屏=休眠、ADB 掉线、sync 通道故障）与收音机方案（改走 ARCS SDK 固件内实现）；固件侧小应用音频补丁存档到 `firmware/`。

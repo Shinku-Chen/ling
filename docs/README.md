@@ -11,6 +11,10 @@
 | 搭环境（模拟器 / adb / ling CLI） | [development/environment-setup.md](development/environment-setup.md) |
 | 跑模拟器、上传设备、抓日志截图 | [development/dev-loop.md](development/dev-loop.md) |
 | 了解云端下发是什么、能不能上架 | [development/cloud-distribution.md](development/cloud-distribution.md) |
+| **烧录固件 / 救砖 / 恢复出厂** | [development/flashing-and-recovery.md](development/flashing-and-recovery.md) |
+| **设备黑屏、ADB 掉线，怎么判断** | [reference/device-behavior-log.md](reference/device-behavior-log.md) |
+| **做收音机（走向哪条技术路线）** | [development/radio-native-plan.md](development/radio-native-plan.md) |
+| 看固件侧补丁（小应用音频能力） | [../firmware/README.md](../firmware/README.md) |
 | 让 AI 在这个仓库里正确干活 | [../AGENTS.md](../AGENTS.md)、[development/ai-guide.md](development/ai-guide.md) |
 | 找官方原始资料 | [reference/README.md](reference/README.md) |
 

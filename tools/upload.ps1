@@ -10,7 +10,7 @@
 
 .EXAMPLE
 .\tools\upload.ps1 -Id timer                       # 只有一台设备时自动选择
-.\tools\upload.ps1 -Id timer -Serial FFBBCCDDEE001124
+.\tools\upload.ps1 -Id timer -Serial <serial>
 .\tools\upload.ps1 -Id timer -SkipBuild
 #>
 [CmdletBinding()]

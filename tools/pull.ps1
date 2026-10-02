@@ -9,7 +9,7 @@
 
 .EXAMPLE
 .\tools\pull.ps1
-.\tools\pull.ps1 -Serial FFBBCCDDEE001124 -Out dist\timer
+.\tools\pull.ps1 -Serial <serial> -Out dist\timer
 #>
 [CmdletBinding()]
 param(

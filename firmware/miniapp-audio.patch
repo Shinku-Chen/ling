@@ -1,0 +1,478 @@
+From 3efeccacf36e08ff1af2e09fe9a9a74c87c88246 Mon Sep 17 00:00:00 2001
+From: Shinku <17696928+Shinku-Chen@users.noreply.github.com>
+Date: Fri, 2 Oct 2026 13:06:14 +0800
+Subject: [PATCH] =?UTF-8?q?feat(miniapp):=20=E5=B0=8F=E5=BA=94=E7=94=A8?=
+ =?UTF-8?q?=E6=94=AF=E6=8C=81=E6=92=AD=E6=94=BE=20HTTP(S)=20=E9=9F=B3?=
+ =?UTF-8?q?=E9=A2=91=E6=B5=81?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+新增 audio 表（play/stop/pause/resume/state），复用 voice_player_comm 里已有的
+miniapp 播放器实例；播放请求交给独立任务执行，避免慢速打开或停止阻塞 20ms 的
+Lua tick。
+
+- 能力上报：get_device_capabilities 增加 runtime.lua_sdk.audio
+  （version / max_url_bytes / schemes），小应用据此判断音频是否可用。
+- 候选启动阶段只记录播放意图，候选失败不出声；退出或替换实例时停止该实例
+  发起的流。
+- 焦点策略：miniapp 通道由「被抢占即停止」改为「被抢占时暂停」，语音交互或
+  TTS 结束后由焦点管理器自动续播；提示音与闹钟仍按原策略停止。
+- 播放器实例与焦点通道的创建条件由 CONFIG_MINIAPP_BUZZER 放宽为
+  MINIAPP_BUZZER || MINIAPP_AUDIO。
+- 不提供音量接口：音量继续由系统音量统一管理。
+---
+ .../mcp-tools/mcp_tool_device_capabilities.c  |  12 ++
+ apps/arcs-mini/miniapp/Kconfig                |  10 +
+ apps/arcs-mini/miniapp/miniapp.h              |   6 +
+ apps/arcs-mini/miniapp/miniapp_runtime.c      | 204 ++++++++++++++++++
+ docs/miniapp.md                               |  37 ++++
+ src/category/comm/voice_player_comm.c         |  13 +-
+ 6 files changed, 277 insertions(+), 5 deletions(-)
+
+diff --git a/apps/arcs-mini/mcp-tools/mcp_tool_device_capabilities.c b/apps/arcs-mini/mcp-tools/mcp_tool_device_capabilities.c
+index 34fd85db..03a3180e 100644
+--- a/apps/arcs-mini/mcp-tools/mcp_tool_device_capabilities.c
++++ b/apps/arcs-mini/mcp-tools/mcp_tool_device_capabilities.c
+@@ -102,6 +102,18 @@ static cJSON *capabilities_call(const char *id, const char *name, cJSON *args)
+         !cJSON_AddNumberToObject(tts, "timeout_ms", MINIAPP_TTS_TIMEOUT_MS)) {
+         goto failed;
+     }
++#ifdef CONFIG_MINIAPP_AUDIO
++    cJSON *audio = cJSON_AddObjectToObject(sdk, "audio");
++    if (!audio || !cJSON_AddNumberToObject(audio, "version", 1) ||
++        !cJSON_AddNumberToObject(audio, "max_url_bytes", MINIAPP_AUDIO_URL_MAX)) {
++        goto failed;
++    }
++    cJSON *audio_schemes = cJSON_Parse("[\"http\",\"https\"]");
++    if (!audio_schemes || !cJSON_AddItemToObject(audio, "schemes", audio_schemes)) {
++        cJSON_Delete(audio_schemes);
++        goto failed;
++    }
++#endif
+     cJSON *storage = cJSON_AddObjectToObject(sdk, "storage");
+     if (!storage || !cJSON_AddNumberToObject(storage, "max_bytes", MINIAPP_STORAGE_MAX_BYTES) ||
+         !cJSON_AddNumberToObject(storage, "max_apps", MINIAPP_STORAGE_MAX_APPS) ||
+diff --git a/apps/arcs-mini/miniapp/Kconfig b/apps/arcs-mini/miniapp/Kconfig
+index 318f035e..59ec324a 100644
+--- a/apps/arcs-mini/miniapp/Kconfig
++++ b/apps/arcs-mini/miniapp/Kconfig
+@@ -57,4 +57,14 @@ config MINIAPP_BUZZER
+     bool "Expose speaker-generated tones"
+     default y
+ 
++config MINIAPP_AUDIO
++    bool "Expose HTTP(S) audio stream playback"
++    depends on APP_PLAYER
++    default y
++    help
++      Let Lua play a remote audio stream (internet radio, podcast or a server
++      announcement) through the shared miniapp player. Playback uses the
++      device's current network connection and the system volume, replaces the
++      previous stream and stops when another audio channel takes the focus.
++
+ endif
+diff --git a/apps/arcs-mini/miniapp/miniapp.h b/apps/arcs-mini/miniapp/miniapp.h
+index 8970fb43..eebf5366 100644
+--- a/apps/arcs-mini/miniapp/miniapp.h
++++ b/apps/arcs-mini/miniapp/miniapp.h
+@@ -30,6 +30,7 @@
+ #define MINIAPP_TTS_MAX_PENDING 1u
+ #define MINIAPP_TTS_TIMEOUT_MS 120000u
+ #define MINIAPP_HTTP_MAX_URL_BYTES 511u
++#define MINIAPP_AUDIO_URL_MAX MINIAPP_HTTP_MAX_URL_BYTES
+ #define MINIAPP_HTTP_MAX_REQUESTS 4u
+ #define MINIAPP_HTTP_DEFAULT_TIMEOUT_MS 10000u
+ #define MINIAPP_HTTP_MAX_TIMEOUT_MS 60000u
+@@ -58,6 +59,11 @@
+ #else
+ #define MINIAPP_HAS_BUZZER 0
+ #endif
++#ifdef CONFIG_MINIAPP_AUDIO
++#define MINIAPP_HAS_AUDIO 1
++#else
++#define MINIAPP_HAS_AUDIO 0
++#endif
+ 
+ typedef struct {
+     int16_t x;
+diff --git a/apps/arcs-mini/miniapp/miniapp_runtime.c b/apps/arcs-mini/miniapp/miniapp_runtime.c
+index b5cc3e35..a3d26b75 100644
+--- a/apps/arcs-mini/miniapp/miniapp_runtime.c
++++ b/apps/arcs-mini/miniapp/miniapp_runtime.c
+@@ -124,6 +124,10 @@ typedef struct {
+     uint32_t led_on_ms, led_off_ms;
+     unsigned buzz_count;
+     miniapp_buzzer_command_t buzz[4];
++#if MINIAPP_HAS_AUDIO
++    bool pending_audio_play;
++    char pending_audio_url[MINIAPP_AUDIO_URL_MAX + 1];
++#endif
+ } miniapp_vm_t;
+ 
+ typedef struct {
+@@ -138,6 +142,23 @@ static QueueHandle_t s_event_queue;
+ static TaskHandle_t s_task;
+ static QueueHandle_t s_buzzer_queue;
+ static TaskHandle_t s_buzzer_task;
++#if MINIAPP_HAS_AUDIO
++typedef enum {
++    MINIAPP_AUDIO_PLAY = 0,
++    MINIAPP_AUDIO_STOP,
++    MINIAPP_AUDIO_PAUSE,
++    MINIAPP_AUDIO_RESUME,
++} miniapp_audio_action_t;
++
++typedef struct {
++    miniapp_audio_action_t action;
++    char url[MINIAPP_AUDIO_URL_MAX + 1];
++    uint32_t generation;
++} miniapp_audio_command_t;
++
++static QueueHandle_t s_audio_queue;
++static TaskHandle_t s_audio_task;
++#endif
+ static QueueHandle_t s_http_queue;
+ static TaskHandle_t s_http_task;
+ static SemaphoreHandle_t s_http_lock;
+@@ -511,6 +532,141 @@ static int miniapp_lua_buzzer_play(lua_State *L)
+     return 0;
+ }
+ 
++#if MINIAPP_HAS_AUDIO
++static bool miniapp_audio_player_active(void)
++{
++    app_player_state_t state = app_player_get_state(miniapp_player);
++    return state == APP_PLAYER_STATE_PREPARING || state == APP_PLAYER_STATE_PREPARED ||
++           state == APP_PLAYER_STATE_PLAYING || state == APP_PLAYER_STATE_PAUSED;
++}
++
++static void miniapp_audio_enqueue(const char *url, miniapp_audio_action_t action, uint32_t generation)
++{
++    if (!s_audio_queue) return;
++    miniapp_audio_command_t command = { .action = action, .generation = generation };
++    if (url) {
++        strncpy(command.url, url, MINIAPP_AUDIO_URL_MAX);
++        command.url[MINIAPP_AUDIO_URL_MAX] = '\0';
++    }
++    (void)xQueueSend(s_audio_queue, &command, 0);
++}
++
++/* Streams outlive a single Lua callback: open, stop and pause are handed to a
++ * dedicated task so they never block the 20 ms Lua tick. Only this task talks
++ * to the shared miniapp player for stream playback. */
++static void miniapp_audio_task(void *argument)
++{
++    (void)argument;
++    miniapp_audio_command_t command;
++    /* The decoder retains the URL string, so the buffer handed to the player has
++     * to stay alive for as long as the stream runs. One instance runs at most
++     * one stream, and a new play request stops the previous one before its URL
++     * is overwritten. */
++    char stream_url[MINIAPP_AUDIO_URL_MAX + 1];
++    uint32_t playing_generation = 0;
++    for (;;) {
++        if (xQueueReceive(s_audio_queue, &command, pdMS_TO_TICKS(200)) == pdTRUE) {
++            if (miniapp_player && command.generation == s_buzzer_generation) {
++                switch (command.action) {
++                case MINIAPP_AUDIO_PLAY:
++                    /* One stream per instance: a new play request replaces the old one. */
++                    if (miniapp_audio_player_active() && app_player_stop(miniapp_player) != APP_PLAYER_OK) {
++                        LISA_LOGW(TAG, "failed to stop previous audio stream");
++                        break;
++                    }
++                    memcpy(stream_url, command.url, sizeof(stream_url));
++                    if (app_player_play(miniapp_player, stream_url) != APP_PLAYER_OK) {
++                        LISA_LOGW(TAG, "failed to start audio stream");
++                        break;
++                    }
++                    playing_generation = command.generation;
++                    break;
++                case MINIAPP_AUDIO_STOP:
++                    (void)app_player_stop(miniapp_player);
++                    playing_generation = 0;
++                    break;
++                case MINIAPP_AUDIO_PAUSE:
++                    (void)app_player_pause(miniapp_player);
++                    break;
++                case MINIAPP_AUDIO_RESUME:
++                    (void)app_player_resume(miniapp_player);
++                    break;
++                }
++            }
++        }
++        /* The instance that owned the stream was replaced or has exited. */
++        if (playing_generation && playing_generation != s_buzzer_generation) {
++            (void)app_player_stop(miniapp_player);
++            playing_generation = 0;
++        }
++    }
++}
++
++static const char *miniapp_audio_state_name(app_player_state_t state)
++{
++    switch (state) {
++    case APP_PLAYER_STATE_PREPARING: return "preparing";
++    case APP_PLAYER_STATE_PREPARED: return "prepared";
++    case APP_PLAYER_STATE_PLAYING: return "playing";
++    case APP_PLAYER_STATE_PAUSED: return "paused";
++    case APP_PLAYER_STATE_STOPPED: return "stopped";
++    case APP_PLAYER_STATE_ERROR: return "error";
++    default: return "idle";
++    }
++}
++
++static int miniapp_lua_audio_state(lua_State *L)
++{
++    if (!miniapp_player) {
++        lua_pushstring(L, "unavailable");
++        return 1;
++    }
++    lua_pushstring(L, miniapp_audio_state_name(app_player_get_state(miniapp_player)));
++    return 1;
++}
++
++static int miniapp_lua_audio_play(lua_State *L)
++{
++    miniapp_vm_t *vm = miniapp_vm_get(L);
++    size_t len = 0;
++    const char *url = luaL_checklstring(L, 1, &len);
++
++    if (!len || len > MINIAPP_AUDIO_URL_MAX || memchr(url, '\0', len)) {
++        return luaL_error(L, "url must be 1..%u bytes", MINIAPP_AUDIO_URL_MAX);
++    }
++    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
++        return luaL_error(L, "url must start with http:// or https://");
++    }
++    if (strpbrk(url, "\r\n")) {
++        return luaL_error(L, "url must not contain line breaks");
++    }
++    if (vm->faulted || vm->retiring) {
++        return luaL_error(L, "audio unavailable during exit");
++    }
++    if (vm->validating) {
++        /* A candidate that fails to start must not produce sound. */
++        memcpy(vm->pending_audio_url, url, len + 1);
++        vm->pending_audio_play = true;
++        return 0;
++    }
++    miniapp_audio_enqueue(url, MINIAPP_AUDIO_PLAY, s_buzzer_generation);
++    return 0;
++}
++
++static int miniapp_lua_audio_command(lua_State *L, miniapp_audio_action_t action)
++{
++    miniapp_vm_t *vm = miniapp_vm_get(L);
++    if (!vm->validating && !vm->faulted && !vm->retiring) {
++        miniapp_audio_enqueue(NULL, action, s_buzzer_generation);
++    }
++    return 0;
++}
++
++static int miniapp_lua_audio_stop(lua_State *L) { return miniapp_lua_audio_command(L, MINIAPP_AUDIO_STOP); }
++static int miniapp_lua_audio_pause(lua_State *L) { return miniapp_lua_audio_command(L, MINIAPP_AUDIO_PAUSE); }
++static int miniapp_lua_audio_resume(lua_State *L) { return miniapp_lua_audio_command(L, MINIAPP_AUDIO_RESUME); }
++#endif
++
+ static int miniapp_lua_tts_speak(lua_State *L)
+ {
+     miniapp_vm_t *vm = miniapp_vm_get(L);
+@@ -1452,6 +1608,16 @@ static void miniapp_open_safe_libraries(lua_State *L)
+     miniapp_register_function(L, "buzzer", "play", miniapp_lua_buzzer_play);
+ #endif
+ 
++#if MINIAPP_HAS_AUDIO
++    lua_newtable(L);
++    lua_setglobal(L, "audio");
++    miniapp_register_function(L, "audio", "play", miniapp_lua_audio_play);
++    miniapp_register_function(L, "audio", "stop", miniapp_lua_audio_stop);
++    miniapp_register_function(L, "audio", "pause", miniapp_lua_audio_pause);
++    miniapp_register_function(L, "audio", "resume", miniapp_lua_audio_resume);
++    miniapp_register_function(L, "audio", "state", miniapp_lua_audio_state);
++#endif
++
+     lua_newtable(L);
+     lua_setglobal(L, "clock");
+     miniapp_register_function(L, "clock", "now", miniapp_lua_clock_now);
+@@ -1713,6 +1879,11 @@ static void miniapp_runtime_stop(lua_State **state, miniapp_vm_t *vm, bool navig
+     if (s_buzzer_queue) {
+         xQueueReset(s_buzzer_queue);
+     }
++#if MINIAPP_HAS_AUDIO
++    if (s_audio_queue) {
++        xQueueReset(s_audio_queue);
++    }
++#endif
+     if (navigate_home) {
+         (void)miniapp_ui_close();
+     }
+@@ -1795,6 +1966,11 @@ static int miniapp_replace(lua_State **current, miniapp_vm_t **current_vm,
+     if (s_buzzer_queue) {
+         xQueueReset(s_buzzer_queue);
+     }
++#if MINIAPP_HAS_AUDIO
++    if (s_audio_queue) {
++        xQueueReset(s_audio_queue);
++    }
++#endif
+     service_led_off();
+     taskENTER_CRITICAL();
+     s_current = *request->package;
+@@ -1812,6 +1988,12 @@ static int miniapp_replace(lua_State **current, miniapp_vm_t **current_vm,
+         candidate->buzz[i].generation = s_buzzer_generation;
+         miniapp_buzzer_enqueue(&candidate->buzz[i]);
+     }
++#if MINIAPP_HAS_AUDIO
++    if (candidate->pending_audio_play) {
++        candidate->pending_audio_play = false;
++        miniapp_audio_enqueue(candidate->pending_audio_url, MINIAPP_AUDIO_PLAY, s_buzzer_generation);
++    }
++#endif
+     if (voice_intent_contains(INTENT_MUSIC)) {
+         voice_player_music_publish_info(NULL, NULL);
+         (void)voice_intent_pop(INTENT_MUSIC);
+@@ -1926,6 +2108,12 @@ int miniapp_init(void)
+     if (!s_buzzer_queue) {
+         goto failed;
+     }
++#endif
++#if MINIAPP_HAS_AUDIO
++    s_audio_queue = xQueueCreate(2, sizeof(miniapp_audio_command_t));
++    if (!s_audio_queue) {
++        goto failed;
++    }
+ #endif
+     if (!s_event_queue || !s_http_queue || !s_http_lock || miniapp_ui_init() != 0) {
+         goto failed;
+@@ -1940,6 +2128,12 @@ int miniapp_init(void)
+                     &s_buzzer_task) != pdPASS) {
+         goto failed;
+     }
++#endif
++#if MINIAPP_HAS_AUDIO
++    if (xTaskCreate(miniapp_audio_task, "miniapp.audio", 4096, NULL, 4,
++                    &s_audio_task) != pdPASS) {
++        goto failed;
++    }
+ #endif
+     if (xTaskCreate(miniapp_task, "miniapp.lua", 8192, NULL, 5, &s_task) != pdPASS) {
+         goto failed;
+@@ -1966,6 +2160,16 @@ failed:
+         vQueueDelete(s_buzzer_queue);
+         s_buzzer_queue = NULL;
+     }
++#if MINIAPP_HAS_AUDIO
++    if (s_audio_task) {
++        vTaskDelete(s_audio_task);
++        s_audio_task = NULL;
++    }
++    if (s_audio_queue) {
++        vQueueDelete(s_audio_queue);
++        s_audio_queue = NULL;
++    }
++#endif
+     if (s_event_queue) {
+         vQueueDelete(s_event_queue);
+         s_event_queue = NULL;
+diff --git a/docs/miniapp.md b/docs/miniapp.md
+index 7c26012a..c44859d5 100644
+--- a/docs/miniapp.md
++++ b/docs/miniapp.md
+@@ -270,6 +270,43 @@ JSON 对象使用字符串键，数组使用从 1 开始的连续整数键；不
+ 闹钟冻结期间不执行 Lua 回调，恢复后交付已完成的结果；待交付结果仍占用请求额度。
+ 退出或替换实例会取消其请求，旧结果不会交付给新实例。
+ 
++## 音频播放（`CONFIG_MINIAPP_AUDIO`）
++
++启用后运行环境额外注册 `audio` 表。播放走设备当前的网络连接与系统音量，
++不占用 `http` 接口的并发额度；接口不可用时 `audio` 表不注册。
++
++| 接口 | 参数与约束 |
++| --- | --- |
++| `audio.play(url)` | 播放一路远程音频流；`url` 为 1–511 字节的 `http://` 或 `https://` 地址，不接受换行与 NUL |
++| `audio.stop()` | 停止当前流 |
++| `audio.pause()` / `audio.resume()` | 暂停/恢复当前流 |
++| `audio.state()` | `idle` / `preparing` / `prepared` / `playing` / `paused` / `stopped` / `error`；能力未启用时为 `unavailable` |
++
++行为约定：
++
++- 同一实例只保留一路流：新的 `play` 先停掉上一路；播放期间请求蜂鸣音也会先停掉当前流，
++  与小应用内提示音优先的既有行为一致。
++- 音频焦点：小应用使用独立的 `miniapp` 焦点通道，优先级低于提示音与 TTS。被语音交互或
++  TTS 抢占时**暂停**，焦点恢复后由焦点管理器自动续播；被提示音或闹钟抢占时按通道策略停止。
++- 播放失败（网络不可达、格式不支持等）不会抛异常，状态变为 `error`；应用应轮询
++  `audio.state()` 更新界面。
++- 启动候选阶段（源码执行、`on_start`、首次 `on_tick`）调用 `play` 只记录意图，候选启动
++  失败不会出声；候选成功后才真正开始播放。
++- 退出或替换实例时会停止该实例发起的流；实例释放后旧流不会继续播放。
++- 不提供音量控制：音量统一由系统音量管理（`ls.set_volume`），避免与小应用外的控件冲突。
++- 与 `http` 一致，接口不保证服务器证书校验；直播流（无 `Content-Length`、无限长）由播放器
++  自身处理，应用不应假设流会结束。
++
++```lua
++function on_start()
++  audio.play("http://example.com/live.mp3")
++end
++
++function on_tick(dt_ms)
++  local state = audio.state()   -- "playing" / "paused" / "error" ...
++end
++```
++
+ ## 小应用语音模式
+ 
+ 设备在每个 `start` 帧生成时读取当前运行状态。小应用活跃时添加：
+diff --git a/src/category/comm/voice_player_comm.c b/src/category/comm/voice_player_comm.c
+index 43900008..7a2a1a96 100644
+--- a/src/category/comm/voice_player_comm.c
++++ b/src/category/comm/voice_player_comm.c
+@@ -17,7 +17,7 @@ app_player_t *tone_player = NULL;
+ app_player_t *tts_player = NULL;
+ app_player_t *music_player = NULL;
+ app_player_t *alert_player = NULL;
+-#ifdef CONFIG_MINIAPP_BUZZER
++#if defined(CONFIG_MINIAPP_BUZZER) || defined(CONFIG_MINIAPP_AUDIO)
+ app_player_t *miniapp_player = NULL;
+ #endif
+ 
+@@ -129,7 +129,7 @@ static void volume_thread_func(void *arg)
+         if (alert_player != NULL) {
+             app_player_set_volume(alert_player, volume);
+         }
+-#ifdef CONFIG_MINIAPP_BUZZER
++#if defined(CONFIG_MINIAPP_BUZZER) || defined(CONFIG_MINIAPP_AUDIO)
+         if (miniapp_player != NULL) {
+             app_player_set_volume(miniapp_player, volume);
+         }
+@@ -244,14 +244,17 @@ int voice_player_platform_init(void)
+                 .on_focus_lost = APP_PLAYER_FOCUS_LOSS_STOP,
+             }
+         },
+-#ifdef CONFIG_MINIAPP_BUZZER
++#if defined(CONFIG_MINIAPP_BUZZER) || defined(CONFIG_MINIAPP_AUDIO)
+         {
+             .name = "miniapp",
+             .priority = 45,
+             .capture_names = NULL,
+             .capture_count = 0,
+             .behavior = {
+-                .on_background = APP_PLAYER_FOCUS_LOSS_STOP,
++                /* A miniapp stream (for example a radio) should survive a
++                 * spoken reply: pause it while a higher channel owns the
++                 * output instead of dropping the playback session. */
++                .on_background = APP_PLAYER_FOCUS_LOSS_PAUSE,
+                 .on_focus_lost = APP_PLAYER_FOCUS_LOSS_STOP,
+             }
+         },
+@@ -294,7 +297,7 @@ int voice_player_platform_init(void)
+         LOGE("Failed to create alert player");
+         return -1;
+     }
+-#ifdef CONFIG_MINIAPP_BUZZER
++#if defined(CONFIG_MINIAPP_BUZZER) || defined(CONFIG_MINIAPP_AUDIO)
+     miniapp_player = app_player_create("miniapp");
+     if (miniapp_player == NULL) {
+         LOGE("Failed to create miniapp player");
+-- 
+2.55.0.windows.2
+

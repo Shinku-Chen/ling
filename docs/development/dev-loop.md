@@ -41,8 +41,8 @@
 ## 4. 上真机（adb）
 
 ```powershell
-.\tools\upload.ps1 -Id timer -Serial FFBBCCDDEE001124   # 多台设备时必须指定；只有一台时可省略
-.\tools\pull.ps1   -Serial FFBBCCDDEE001124             # adb pull /miniapp/miniapp.lua → dist\device-app.lua
+.\tools\upload.ps1 -Id timer -Serial <serial>   # 多台设备时必须指定；只有一台时可省略
+.\tools\pull.ps1   -Serial <serial>             # adb pull /miniapp/miniapp.lua → dist\device-app.lua
 ```
 
 先确认哪台是开发板（手机和开发板同时插着时 `adb devices` 会列出多台）：
