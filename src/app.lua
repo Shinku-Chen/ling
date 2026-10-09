@@ -31,8 +31,8 @@ local C_RED = 0xFF5D62
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
 local METER_COUNT = 18   -- kMeterCount
-local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 72, 196, 54
-local METER_X, METER_Y, METER_W, METER_H = 13, 132, 214, 46
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 78, 196, 54
+local METER_X, METER_Y, METER_W, METER_H = 13, 138, 214, 46
 
 local state = {
     screen = SCREEN_PLAYER,
@@ -245,13 +245,13 @@ local function draw_player()
     draw_header()
 
     -- 台名（原版用大字体居中）
-    ui.text_center(ui.truncate(station and station.name or "无电台", 48), 28, C_TEXT)
+    ui.text_center(ui.truncate(station and station.name or "无电台", 48), 34, C_TEXT)
 
     -- 描述行（原版 12,105 居中）；频率有解析结果时并入这一行
     local desc = station and tostring(station.desc or "") or ""
     local freq = station and stations.format_frequency(station.freq or 0) or ""
     if freq ~= "" then desc = "FM" .. freq .. " · " .. desc end
-    ui.text_center(ui.truncate(desc, 48), 48, C_MUTED)
+    ui.text_center(ui.truncate(desc, 48), 54, C_MUTED)
 
     -- 刻度盘面板：圆角 8 + 1px 边框（原版 radius 8 / 边框 kGrid）
     ui.round_rect(DIAL_X, DIAL_Y, DIAL_W, DIAL_H, 8, C_GRID, 2)
@@ -268,16 +268,16 @@ local function draw_player()
 
     -- 播放图标 + 状态行（原版 13,270 / 39,272；本机整体上移）
     -- 状态行：图标与文字共用垂直中心 cy=182（图标 12px、文字 16px）
-    draw_play_icon(13, 184, playing)
+    draw_play_icon(13, 190, playing)
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
     end
     if state.err ~= "-" then status = state.err end
-    ui.text_vcenter(ui.truncate(status, 40), 34, 190, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    ui.text_vcenter(ui.truncate(status, 40), 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
     -- 右侧：位置（城市）右对齐，与状态同一垂直中心
     local city = tostring(state.city_display or "内置")
-    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 190, C_AMBER)
+    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 196, C_AMBER)
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
