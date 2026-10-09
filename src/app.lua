@@ -170,8 +170,7 @@ local function on_detect_done(data, err)
     state.detect_city = city
     state.city_display = city
     state.pending_search = true                    -- 定位完成后再搜电台
-    state.last_draw_ms = state.t_ms
-    draw()
+    state.last_draw_ms = 0                         -- 让 tick 下一帧立即重绘（不在回调里 draw）
 end
 
 local function start_search(city_index)
@@ -239,7 +238,7 @@ local function draw_header()
         local fw = math.floor(20 * pct / 100 + 0.5)   -- 内腔 200..219 共 20px   -- 内腔 200..217，按百分比实心填充
         if pct > 0 and fw < 1 then fw = 1 end
         if fw > 0 then
-            ui.rect(200, 9, fw, 6, charging and C_GREEN or (pct <= 15 and C_RED or C_AMBER))
+            ui.rect(200, 8, fw, 8, charging and C_GREEN or (pct <= 15 and C_RED or C_AMBER))   -- 填满内腔 8..15
         end
         local txt = pct .. "%"
         ui.text(172 - ui.text_width(txt), 4, charging and C_GREEN or C_MUTED)
@@ -325,10 +324,11 @@ local function draw_player()
     -- 电量百分比要用掉 1 段，所以把这两段（同处一行）合并，靠空格把城市顶到右对齐位置。
     local city = tostring(state.city_display or "内置")
     local body = ui.truncate(status, 40)
+    -- 注意：text_width(" ") 可能返回 nil（空格无字模），必须兜底，否则 nil 比较会直接终止应用
     local sw = ui.text_width(" ")
+    if type(sw) ~= "number" or sw <= 0 then sw = 8 end
     local gap = ui.W - 14 - 34 - ui.text_width(body) - ui.text_width(city)
-    local n = 1
-    if sw > 0 then n = math.floor(gap / sw) end
+    local n = math.floor(gap / sw)
     if n < 1 then n = 1 end
     if n > 15 then n = 15 end
     local pad = ""
@@ -581,11 +581,11 @@ function on_tick(dt_ms)
         end
     end
 
-    if state.pending_detect and state.t_ms > 3000 then
+    if false and state.pending_detect and state.t_ms > 3000 then   -- TODO: IP 定位崩溃待修（见 docs）
         state.pending_detect = false
         if net.available() then
             local id = net.get_json("http://ip-api.com/json/?lang=zh-CN", on_detect_done,
-                { max_response_bytes = 4096, timeout_ms = 8000 })
+                { max_response_bytes = 32768, timeout_ms = 15000 })
             if id == nil then state.pending_search = true end     -- 发射失败就直接搜（用北京）
         else
             state.pending_search = true

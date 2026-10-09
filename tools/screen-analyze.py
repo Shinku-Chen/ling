@@ -36,9 +36,13 @@ def classify(v, w, h):
     meter  = count(v, 142, 180, 22, 218, 12)   # 电平条面板内部
     hint   = count(v, 214, 236, 8, 232, 30)    # 底部提示行文字
     f = dict(top=top, row78=row78, dial=dial, meter=meter, hint=hint)
-    if top > 20 and row78 > 50 and meter > 200:
+    # 强特征：播放器页的刻度盘面板上边框是一条接近满宽的直线（实测 196px），
+    # 底部提示行文字也很长；助手待机页只有卡通形象，两个特征都远达不到。
+    hint_long = count(v, 214, 236, 8, 232, 30)
+    f['hint_long'] = hint_long
+    if top > 20 and row78 > 130 and hint_long > 60 and meter > 200:
         return 'player', f
-    if row78 > 50 and dial > 300 and meter < 200:
+    if row78 > 130 and dial < 300 and hint_long > 60:
         return 'menu-or-list', f
     return 'unknown', f
 
