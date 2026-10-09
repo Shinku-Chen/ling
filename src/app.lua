@@ -1,12 +1,15 @@
--- app：网络电台小应用（界面移植自 leo-radio）
+-- app：网络电台小应用（界面照 leo-radio 的 build_main / timer_callback 逐项实现）
 --   单击 → 播放页：换台；列表/城市/菜单：移动选中项
---   双击 → 播放页：进设置菜单并暂停；其它页：确认（选台 / 选择城市 / 执行菜单项）
+--   双击 → 播放页：进设置菜单并暂停；其它页：确认
 --   三击 → 从子页面返回播放页
 --   长按 → 退出小应用（系统行为）
 --
--- 视觉对齐 leo-radio 的 build_main：LEO RADIO 标题、时钟、电量、WiFi 条、CH 编号、
--- 台名、刻度盘面板、电平条面板、播放图标 + 状态行、底部提示。
--- 差异说明：本机画布 240×240（原版 240×320），且小应用每帧最多 8 段文字 → 布局做了压缩。
+-- 与原版的已知差异（沙箱限制，非实现取舍）：
+--   * 画布 240×240（原版 240×320）→ 各行整体上移压缩
+--   * 每帧最多 8 段文字（原版主界面 13 段）→ 省掉 6 个刻度数字中的 4 个、电量百分比、位置文字
+--   * 只有一种 16px 字体（原版台名用 radio_font_title 大字体）
+--   * 无电量/网络接口 → 电量只画轮廓、WiFi 条用"是否在播放"推断
+--   * 读不到音频电平 → 电平条改为"播放活动"指示（分级配色与原版一致）
 
 local SCREEN_PLAYER = 1
 local SCREEN_MENU = 2
@@ -27,7 +30,9 @@ local C_RED = 0xFF5D62
 
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
-local METER_COUNT = 18      -- 与 kMeterCount 一致
+local METER_COUNT = 18   -- kMeterCount
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 13, 64, 214, 69
+local METER_X, METER_Y, METER_W, METER_H = 13, 140, 214, 49
 
 local state = {
     screen = SCREEN_PLAYER,
@@ -55,21 +60,21 @@ local function audio_ready()
     return audio ~= nil and audio.play ~= nil
 end
 
+-- 状态文案对齐原版 playback_text()
 local function state_text(s)
-    if s == "playing" then return "播放中" end
+    if s == "playing" then return "正在播放" end
     if s == "paused" then return "已暂停" end
-    if s == "preparing" or s == "prepared" then return "连接中" end
-    if s == "stopped" then return "已停止" end
+    if s == "preparing" then return "正在连接电台" end
+    if s == "prepared" then return "正在缓冲" end
+    if s == "stopped" then return "已暂停" end
     if s == "error" then return "播放失败" end
     if s == "unavailable" then return "无音频接口" end
     return "准备播放"
 end
 
 local function state_color(s)
-    if s == "playing" then return C_GREEN end
     if s == "error" or s == "unavailable" then return C_RED end
-    if s == "preparing" or s == "prepared" then return C_AMBER end
-    return C_MUTED
+    return C_TEXT
 end
 
 local function clock_text()
@@ -84,7 +89,7 @@ end
 local function fmt_mmss(ms)
     local total = math.floor((ms + 999) / 1000)
     if total < 0 then total = 0 end
-    return string.format("%d:%02d", math.floor(total / 60), total % 60)
+    return string.format("%02d:%02d", math.floor(total / 60), total % 60)
 end
 
 --------------------------------------------------------------------------
@@ -99,7 +104,6 @@ local function play_index(index)
         state.err = "无电台"
         return
     end
-    -- 界面先跟上（音频不可用时也要更新指针）
     dial.move_to(dial.x_for_station(station.freq or 0, state.index, stations.count()), true)
 
     if not audio_ready() then
@@ -163,7 +167,7 @@ local function start_search(city_index)
     state.err = "-"
     draw()
 
-    -- 注意：请求可能同步失败（URL 非法、无网络），必须判返回值，否则 searching 会永远卡住
+    -- 请求可能同步失败（URL 非法 / 无网络）：必须判返回值，否则 searching 会永远卡住
     local id, err = net.get_json(stations.search_url(city.query or "北京"), on_search_done,
         { max_response_bytes = 32768, timeout_ms = 15000 })
     if id == nil then
@@ -174,91 +178,106 @@ local function start_search(city_index)
 end
 
 --------------------------------------------------------------------------
--- 绘制：通用件
+-- 绘制
 --------------------------------------------------------------------------
 
+-- 顶栏：LEO RADIO / 时钟 / 电量轮廓 / WiFi 条 / 分隔线（原版 12,10 + 100,7 + 195,11 + 178.. + 12,37）
 local function draw_header()
     ui.text("LEO RADIO", 12, 4, C_AMBER)
-    local clock_str = clock_text()
-    ui.text(clock_str, 190 - ui.text_width(clock_str), 4, C_TEXT)
 
-    -- WiFi 信号条（3 根）与电量图标：小应用没有对应数据接口，这里只画轮廓，不表示真实数值
+    local cs = clock_text()
+    ui.text(cs, 190 - ui.text_width(cs), 3, C_TEXT)
+
+    -- 电量：小应用没有电池接口，只画轮廓（原版在此显示百分比）
+    ui.rect(199, 4, 22, 10, C_BG)
+    ui.rect(199, 4, 22, 1, C_MUTED)
+    ui.rect(199, 13, 22, 1, C_MUTED)
+    ui.rect(199, 5, 1, 8, C_MUTED)
+    ui.rect(220, 5, 1, 8, C_MUTED)
+    ui.rect(221, 7, 2, 4, C_MUTED)
+
+    -- WiFi 条：原版联网时绿色、否则暗；这里用"是否正在播放"推断连通
+    local online = (state.audio_state == "playing") or (not state.paused and state.online)
     for i = 0, 2 do
         local h = 3 + i * 3
-        ui.rect(178 + i * 5, 17 - h, 3, h, C_MUTED)
+        ui.rect(176 + i * 5, 16 - h, 3, h, online and C_GREEN or C_MUTED)
     end
-    ui.rect(198, 6, 24, 10, C_BG)
-    ui.rect(198, 6, 24, 1, C_MUTED)
-    ui.rect(198, 15, 24, 1, C_MUTED)
-    ui.rect(198, 6, 1, 10, C_MUTED)
-    ui.rect(222, 6, 1, 10, C_MUTED)
-    ui.rect(223, 9, 2, 4, C_MUTED)
+
     ui.rect(12, 24, 216, 1, C_GRID)
 end
 
--- 播放 / 暂停图标（原版用 ">" 字形，这里用矩形拼一个小三角）
+-- 播放图标：原版"播放中显示 II、否则显示 >"
 local function draw_play_icon(x, y, playing)
     if playing then
-        ui.rect(x, y, 5, 12, C_AMBER)
-        ui.rect(x + 5, y + 3, 6, 6, C_AMBER)
-        ui.rect(x + 11, y + 5, 6, 2, C_AMBER)
-    else
         ui.rect(x, y, 4, 12, C_AMBER)
         ui.rect(x + 7, y, 4, 12, C_AMBER)
+    else
+        ui.rect(x, y, 5, 12, C_AMBER)
+        ui.rect(x + 5, y + 3, 5, 6, C_AMBER)
+        ui.rect(x + 10, y + 5, 4, 2, C_AMBER)
     end
 end
 
--- 电平条面板：原版由音频电平驱动；小应用读不到电平数据，这里作为"播放活动"指示
+-- 电平条：几何与配色分级照原版（h = 3 + level*34/100，底部 y=40，>85 红 / >62 琥珀 / 其余绿）
+-- 原版由音频电平驱动；小应用读不到电平，这里用播放活动（正弦）驱动，仅作活动指示
 local function draw_meter(active)
-    local px, py, pw, ph = 13, 140, 214, 49
-    ui.rect(px, py, pw, ph, C_PANEL_SOFT)
-    ui.rect(px, py, pw, 1, C_GRID)
-    ui.rect(px, py + ph - 1, pw, 1, C_GRID)
     for i = 0, METER_COUNT - 1 do
-        local h = 3
-        local color = C_GRID
+        local level = 0
         if active then
-            local wave = (math.sin(state.t_ms / 420 + i * 0.8) + 1) / 2
-            local wave2 = (math.sin(state.t_ms / 190 + i * 0.35) + 1) / 2
-            h = 3 + math.floor((wave * 0.6 + wave2 * 0.4) * 32)
-            color = (h > 26) and C_AMBER or C_AMBER_SOFT
+            local w1 = (math.sin(state.t_ms / 420 + i * 0.8) + 1) / 2
+            local w2 = (math.sin(state.t_ms / 190 + i * 0.35) + 1) / 2
+            level = math.floor((w1 * 0.6 + w2 * 0.4) * 100)
         end
-        ui.rect(px + 9 + i * 11, py + 35 + 3 - h, 6, h, color)
+        local h = 3 + math.floor(level * 34 / 100)
+        local color = C_GREEN
+        if level > 85 then color = C_RED
+        elseif level > 62 then color = C_AMBER
+        elseif not active then color = C_GRID end
+        ui.rect(METER_X + 9 + i * 11, METER_Y + 40 - h, 6, h, color)
     end
 end
-
---------------------------------------------------------------------------
--- 绘制：播放页
---------------------------------------------------------------------------
 
 local function draw_player()
     local station = stations.get(state.index)
     ui.begin(C_BG)
     draw_header()
 
-    ui.text("CH " .. string.format("%02d", state.index) .. " / " ..
-        string.format("%02d", stations.count()), 13, 30, C_AMBER)
+    -- CH 编号 + 频率读数（原版读数在刻度盘面板内右下；这里并到同一行以节省文字额度）
+    local freq = station and stations.format_frequency(station.freq or 0) or ""
+    local ch = "CH " .. string.format("%02d", state.index) .. " / " ..
+        string.format("%02d", stations.count())
+    if freq ~= "" then ch = ch .. "    FM" .. freq end
+    ui.text(ch, 13, 30, C_AMBER)
 
+    -- 台名（原版用大字体居中）
     ui.text_center(ui.truncate(station and station.name or "无电台", 48), 48, C_TEXT)
 
-    -- 刻度盘面板
-    dial.panel_x, dial.panel_y = 13, 64
-    dial.draw_panel()
+    -- 刻度盘面板：圆角 8 + 1px 边框（原版 radius 8 / 边框 kGrid）
+    ui.round_rect(DIAL_X, DIAL_Y, DIAL_W, DIAL_H, 8, C_GRID, 2)
+    ui.round_rect(DIAL_X + 1, DIAL_Y + 1, DIAL_W - 2, DIAL_H - 2, 7, C_PANEL, 2)
+    dial.panel_x, dial.panel_y = DIAL_X, DIAL_Y
     dial.draw()
     dial.draw_labels()
+    -- 面板内左下角的位置文字（原版 s_location 在 dial 的 8,47）
+    ui.text(ui.truncate(state.city_display or "内置", 18), DIAL_X + 8, DIAL_Y + 47, C_AMBER)
 
-    -- 状态：播放图标 + 文案（频率与睡眠定时都并进这一行，省文字额度）
+    -- 电平条面板：圆角 7
+    ui.round_rect(METER_X, METER_Y, METER_W, METER_H, 7, C_PANEL_SOFT, 2)
+
     local playing = (state.audio_state == "playing") and not state.paused
-    draw_play_icon(13, 196, playing)
-    local status = state_text(state.audio_state)
-    if state.paused then status = "已暂停" end
-    local freq = station and stations.format_frequency(station.freq or 0) or ""
-    if freq ~= "" then status = status .. " · FM" .. freq end
-    if state.sleep_left_ms > 0 then status = status .. " · 睡眠 " .. fmt_mmss(state.sleep_left_ms) end
-    if state.err ~= "-" then status = state.err end
-    ui.text(ui.truncate(status, 48), 34, 199, state.err ~= "-" and C_RED or state_color(state.audio_state))
-
     draw_meter(playing)
+
+    -- 播放图标 + 状态行（原版 13,270 / 39,272）
+    draw_play_icon(13, 195, playing)
+    local status = state_text(state.audio_state)
+    if state.sleep_left_ms > 0 then
+        status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
+    end
+    if state.online then
+        status = status .. "   " .. state.city_display
+    end
+    if state.err ~= "-" then status = state.err end
+    ui.text(ui.truncate(status, 50), 34, 198, state.err ~= "-" and C_RED or state_color(state.audio_state))
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
@@ -266,7 +285,7 @@ local function draw_player()
 end
 
 --------------------------------------------------------------------------
--- 绘制：列表类页面（菜单 / 电台列表 / 城市）
+-- 绘制：列表类页面
 --------------------------------------------------------------------------
 
 local source_title = ""
@@ -286,9 +305,9 @@ local function draw_list_rows(items, selected, label_of, empty_hint)
         for i = first, math.min(#items, first + ROWS - 1) do
             local y = 34 + row * 26
             local sel = (i == selected)
-            ui.rect(10, y - 4, 220, 23, sel and C_PANEL_SOFT or C_PANEL)
-            ui.rect(10, y - 4, 3, 23, sel and C_AMBER or C_GRID)
-            ui.text(ui.truncate(label_of(items[i]), 48), 20, y, sel and C_TEXT or C_MUTED)
+            ui.round_rect(10, y - 4, 220, 23, 6, sel and C_PANEL_SOFT or C_PANEL, 2)
+            ui.rect(14, y - 2, 3, 19, sel and C_AMBER or C_GRID)
+            ui.text(ui.truncate(label_of(items[i]), 48), 22, y, sel and C_TEXT or C_MUTED)
             row = row + 1
         end
     end
@@ -463,7 +482,6 @@ function on_tick(dt_ms)
     store.tick(dt_ms)
     dial.tick(dt_ms)
 
-    -- 指针动画 / 电平条 / 搜索呼吸需要持续刷新
     if state.screen == SCREEN_PLAYER or dial.animating() or state.searching then
         draw()
     end
@@ -476,7 +494,6 @@ function on_tick(dt_ms)
         end
     end
 
-    -- 搜索看门狗：请求若迟迟不回来，避免卡在"正在搜索"
     if state.searching and (state.t_ms - state.search_started_ms) > 25000 then
         state.searching = false
         state.err = "搜索超时"
@@ -499,7 +516,6 @@ function on_tick(dt_ms)
 end
 
 function on_button_click(button_id)
-    -- 运行时通过这个全局回调交付按键；漏写就会「按键无反应」
     input.button(button_id)
 end
 

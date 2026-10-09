@@ -101,15 +101,7 @@ end
 -- 绘制
 --------------------------------------------------------------------------
 
--- 面板底板 + 边框（对应原版 make_box(..., kPanel, 8) + kGrid 边框）
-function dial.draw_panel()
-    local x, y = dial.panel_x, dial.panel_y
-    ui.rect(x, y, dial.panel_w, dial.panel_h, 0x0D1B23)
-    ui.rect(x, y, dial.panel_w, 1, 0x24404A)
-    ui.rect(x, y + dial.panel_h - 1, dial.panel_w, 1, 0x24404A)
-    ui.rect(x, y, 1, dial.panel_h, 0x24404A)
-    ui.rect(x + dial.panel_w - 1, y, 1, dial.panel_h, 0x24404A)
-end
+-- 面板底板由调用方绘制（app.lua 用 ui.round_rect 做圆角），这里只管刻度、指针与光晕
 
 function dial.draw()
     -- 刻度：0.5 MHz 间隔，长刻度每 4 MHz，中刻度每 1 MHz
@@ -134,8 +126,10 @@ function dial.draw()
     ui.rect(ax(nx) - math.floor(NEEDLE_W / 2), ay(27), NEEDLE_W, 22, 0xFFB74D)
 end
 
--- 刻度两端的数字（原版每 4 MHz 一个数字，受每帧文字上限限制这里只标两端）
+-- 刻度数字：原版每 4 MHz 一个（88/92/96/100/104/108），各自以刻度为中心居中。
+-- 受“每帧最多 8 段文字”限制，这里合并成一行、用空格近似对齐到各自刻度。
+local SCALE_LABELS = "88   92  96  100  104 108"
+
 function dial.draw_labels()
-    ui.text("88", ax(TRACK_LEFT) - 2, ay(6), 0x849BA0)
-    ui.text("108", ax(TRACK_RIGHT) - 18, ay(6), 0x849BA0)
+    ui.text(SCALE_LABELS, ax(8), ay(6), 0x849BA0)
 end
