@@ -29,7 +29,7 @@ local C_GREEN = 0x4ED39A
 local C_RED = 0xFF5D62
 
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
-local ROWS = 5
+local ROWS = 7   -- 列表区 34..214、行距 26px，正好容纳 7 行（原来 5 行底部空两行）
 local METER_COUNT = 18   -- kMeterCount
 local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 78, 196, 54
 local METER_X, METER_Y, METER_W, METER_H = 13, 138, 214, 46
