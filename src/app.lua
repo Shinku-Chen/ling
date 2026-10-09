@@ -31,8 +31,8 @@ local C_RED = 0xFF5D62
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
 local METER_COUNT = 18   -- kMeterCount
-local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 66, 196, 69
-local METER_X, METER_Y, METER_W, METER_H = 13, 140, 214, 49
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 64, 196, 54
+local METER_X, METER_Y, METER_W, METER_H = 13, 124, 214, 46
 
 local state = {
     screen = SCREEN_PLAYER,
@@ -187,7 +187,7 @@ local function draw_header()
         string.format("%02d", stations.count()), 12, 4, C_AMBER)
 
     local cs = clock_text()
-    ui.text(cs, 190 - ui.text_width(cs), 3, C_TEXT)
+    ui.text_center(cs, 3, C_TEXT)
 
     -- 电量：小应用没有电池接口，只画轮廓（原版在此显示百分比）
     ui.rect(199, 4, 22, 10, C_BG)
@@ -258,8 +258,6 @@ local function draw_player()
     dial.panel_x, dial.panel_y = DIAL_X, DIAL_Y
     dial.draw()
     dial.draw_labels()
-    -- 面板右下角：本台频率读数（原版 s_dial_readout 的位置）
-    dial.draw_readout(freq ~= "" and ("FM" .. freq) or "", C_AMBER)
 
     -- 电平条面板：圆角 7
     ui.round_rect(METER_X, METER_Y, METER_W, METER_H, 7, C_PANEL_SOFT, 2)
@@ -268,15 +266,16 @@ local function draw_player()
     draw_meter(playing)
 
     -- 播放图标 + 状态行（原版 13,270 / 39,272；本机整体上移）
-    draw_play_icon(13, 193, playing)
+    draw_play_icon(13, 176, playing)
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
-    else
-        status = status .. "   " .. (state.city_display or "内置")   -- 位置并入状态行（按用户要求）
     end
     if state.err ~= "-" then status = state.err end
-    ui.text(ui.truncate(status, 50), 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    ui.text(ui.truncate(status, 40), 34, 179, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    -- 右侧：位置（城市）右对齐，与状态同一行
+    local city = tostring(state.city_display or "内置")
+    ui.text(city, ui.W - 14 - ui.text_width(city), 179, C_AMBER)
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
