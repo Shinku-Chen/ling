@@ -2,6 +2,27 @@
 
 这里放的是**不属于本仓库（小应用工作区）本体、但需要长期保存**的固件侧产物。
 
+## radio-demo.patch
+
+在固件里**内置一个最小网络电台**（用于验证音频链路；也是小应用路线的备选方案）。
+
+| 项 | 值 |
+|---|---|
+| 基线 | 不依赖其他补丁，可直接打在上游 checkout 上 |
+| 改动范围 | 9 个文件，+228 行 |
+| 开关 | `CONFIG_RADIO_DEMO`（默认 n；演示构建在 `prj.conf` 里打开） |
+| 行为 | 开机自动播第一个台；短按换台；双击暂停/继续；长按交给系统 |
+| 播放通道 | 复用 `voice_player_comm` 的 `music_player`（焦点托管，被 TTS/唤醒抢占时暂停） |
+| 实测 | 在 mini3 上编译通过并烧录运行（音频链路可用；音质与长时间稳定性未做完整验收） |
+
+应用方式：
+
+```bash
+git apply firmware/radio-demo.patch
+cmake -B build-radiodemo -G Ninja -S apps/arcs-mini -DBOARD=arcs_mini3   # 注意板型
+cmake --build build-radiodemo -j
+```
+
 ## miniapp-audio.patch
 
 给 Arcs-mini 固件的小应用运行时**新增音频播放能力**（`audio.play/stop/pause/resume/state`）的补丁。
@@ -41,16 +62,11 @@ git am firmware/miniapp-audio.patch
 | 编译（`-DBOARD=arcs_mini`，Windows 原生工具链） | ✅ 通过，我们的三个文件零警告，符号与字符串都在产物里 |
 | 体积代价 | +1,664 字节（app 镜像 3,256,960 → 3,258,624；app 分区 4 MiB，余量约 914 KB） |
 | 烧录到真机 | ✅ 成功（`adb shell version` → `3.0.2-3efeccac`） |
-| **功能验证（能否播直播流）** | ❌ **未完成** —— 设备在验证阶段出现 USB/供电故障，实验中断 |
+| **功能验证（能否播直播流）** | ✅ **已通过**：小应用连续播放直播流 **33 秒**、状态全程 `playing`、零错误（探针 `examples/radio-probe.lua`，结果从设备存档读回） |
 
 ### 当前结论与替代路线
 
-- 该补丁**不再作为首选路线**：收音机改为走 **ARCS SDK 固件内实现**
-  （不需要改 SDK、也不需要上游 MR），见
-  [`../docs/development/radio-native-plan.md`](../docs/development/radio-native-plan.md)。
-- 保留此补丁的用途：
-  1. 若将来希望"小应用也能播音频"，这是一份可提上游的参考实现；
-  2. 里面几条**踩坑结论**对任何音频相关改动都适用：
-     - 底层解码器**保留 URL 指针** → 传入的字符串必须活到播放结束；
-     - 候选实例启动阶段**不能产生副作用**（不能出声），要延迟到替换成功之后；
-     - 播放/停止**不能阻塞 Lua 的 20 ms tick**，必须交给独立任务。
+- **小应用路线已验证可用**：补丁编译、烧录、实测均通过，因此当前主应用就是
+  [`../src/app.lua`](../src/app.lua)（网络电台小应用）。
+- 另一条路是固件内实现（见上方 `radio-demo.patch`）：不需要改小应用运行时，适合不想动运行时的场景。
+- 若要提上游 MR：两份补丁都围绕公开固件仓库，提交时留意同步更新 `docs/miniapp.md`（设备侧契约）。

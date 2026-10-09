@@ -13,6 +13,10 @@
 
 ## 1. 进入 ADB recovery（烧录模式）
 
+> ⚠️ **先确认板型**：`arcs_mini` / `arcs_mini3` 不通用，见
+> [../hardware/board-arcs-mini.md](../hardware/board-arcs-mini.md) 顶部的对照表。
+> 本工作区设备是 **mini3**，boot/ap 取 `res/arcs-mini3/`，构建用 `-DBOARD=arcs_mini3`。
+
 ```
 USB 保持连接
 按住【功能键】不放  →  短按【RST】  →  松开【功能键】
@@ -116,8 +120,11 @@ cskburn -C arcs -b 1500000 -s COM<port> --verify-all \
 > 开发阶段写 `boot-dev-autostart.bin` 到 `0x0`，功能验证完成后**必须把官方 `boot.bin` 写回 `0x0`**，
 > 否则设备一直停在"开发 Boot"状态。
 
-- 波特率默认 `1500000`；确认线材稳定后再试 `3000000`。
-- Windows 下串口是 `COMx`（设备管理器或 `mode` 查）。
+- 波特率：**先用 921600**。实测 `1500000` 在 CH340 适配器上烧到 7.9% 会 `ETIMEDOUT`，
+  降到 921600 后一次成功（3.2 MB 约 40 s）；确认线材好再尝试提速。
+- 串口烧的是**常规 boot** 时，复位后**不会自动进入业务，需要手动长按开机键**；
+  `res/arcs-mini/boot-dev-autostart.bin` 才是会自动进业务的开发专用 Boot（仅 mini 有，mini3 没有）。
+- Windows 下串口是 `COMx`（设备管理器查，CH340 会显示 “USB-SERIAL CH340”）。
 
 ## 6. 故障对照表
 

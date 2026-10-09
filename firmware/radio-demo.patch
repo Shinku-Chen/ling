@@ -1,0 +1,320 @@
+diff --git a/apps/arcs-mini/CMakeLists.txt b/apps/arcs-mini/CMakeLists.txt
+index 0a0a9e99..b33a2cd6 100644
+--- a/apps/arcs-mini/CMakeLists.txt
++++ b/apps/arcs-mini/CMakeLists.txt
+@@ -44,6 +44,10 @@ listenai_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/miniapp)
+ if(CONFIG_MINIAPP)
+     add_subdirectory(miniapp)
+ endif()
++listenai_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/radio)
++if(CONFIG_RADIO_DEMO)
++    add_subdirectory(radio)
++endif()
+ add_subdirectory(mcp-tools)
+ add_subdirectory(voice_intent)
+ add_subdirectory(voice_player)
+diff --git a/apps/arcs-mini/Kconfig b/apps/arcs-mini/Kconfig
+index 7718131b..652fe324 100644
+--- a/apps/arcs-mini/Kconfig
++++ b/apps/arcs-mini/Kconfig
+@@ -7,5 +7,6 @@ rsource "../../src/Kconfig"
+ orsource "../../apps-ui/Kconfig"
+ 
+ rsource "miniapp/Kconfig"
++rsource "radio/Kconfig"
+ 
+ endmenu
+diff --git a/apps/arcs-mini/button/app_button.c b/apps/arcs-mini/button/app_button.c
+index 01dd7201..f9b2e22c 100644
+--- a/apps/arcs-mini/button/app_button.c
++++ b/apps/arcs-mini/button/app_button.c
+@@ -12,6 +12,7 @@
+ #include "uboot_features_api.h"
+ #include "voice_cloud.h"
+ #include "miniapp.h"
++#include "radio_demo.h"
+ #include "voice_intent_mgr.h"
+ #include "voice_msg.h"
+ #include "voice_player_comm.h"
+@@ -461,6 +462,13 @@ static void app_button_on_changed(void *unused, uint32_t msg_id, void *data,
+     }
+ #endif
+ 
++#ifdef CONFIG_RADIO_DEMO
++    /* 收音机 Demo：短按换台、双击暂停/继续；长按继续交给系统。 */
++    if (radio_demo_handle_button((int)evt->action)) {
++        return;
++    }
++#endif
++
+     /* 云端异常时，部分按键只负责打开错误或绑定信息页。 */
+     if (app_button_redirect_to_cloud_info(evt->action)) {
+         return;
+diff --git a/apps/arcs-mini/main.c b/apps/arcs-mini/main.c
+index c88c22bb..44b73d10 100644
+--- a/apps/arcs-mini/main.c
++++ b/apps/arcs-mini/main.c
+@@ -26,6 +26,7 @@
+ #include "apps/llm/models/model_qrcode.h"
+ #include "voice_cloud.h"
+ #include "miniapp.h"
++#include "radio_demo.h"
+ #include "app_ble_common.h"
+ 
+ /* 被动网络提示的单次触发状态。 */
+@@ -269,6 +270,12 @@ int main(int argc, char **argv)
+ 
+     app_button_init();
+ 
++#ifdef CONFIG_RADIO_DEMO
++    if (radio_demo_init() != 0) {
++        LOGE("Radio demo init failed");
++    }
++#endif
++
+     battery_init();
+     service_power_policy_init();
+ 
+diff --git a/apps/arcs-mini/prj.conf b/apps/arcs-mini/prj.conf
+index 76dbfcd1..5cc43cd9 100644
+--- a/apps/arcs-mini/prj.conf
++++ b/apps/arcs-mini/prj.conf
+@@ -182,6 +182,7 @@ CONFIG_MAC_MANAGER_MAC_BY_CHIP_ID=y
+ 
+ CONFIG_APP_PLAYER=y
+ CONFIG_APP_PLAYER_AUDIO_FOCUS=y
++CONFIG_RADIO_DEMO=y
+ CONFIG_APP_PLAYER_SEMAPHORE_WAIT_TIMEOUT_MS=10000
+ CONFIG_APP_PLAYER_CALLBACK_THREAD_STACK_SIZE=8192
+ CONFIG_ARCS_HAL_DCACHE_COHERENT=n
+diff --git a/apps/arcs-mini/radio/CMakeLists.txt b/apps/arcs-mini/radio/CMakeLists.txt
+new file mode 100644
+index 00000000..25737fa5
+--- /dev/null
++++ b/apps/arcs-mini/radio/CMakeLists.txt
+@@ -0,0 +1,9 @@
++listenai_library_named(app-radio)
++
++listenai_library_sources(
++    radio_demo.c
++)
++
++listenai_include_directories(
++    ${CMAKE_CURRENT_SOURCE_DIR}
++)
+diff --git a/apps/arcs-mini/radio/Kconfig b/apps/arcs-mini/radio/Kconfig
+new file mode 100644
+index 00000000..94fa7612
+--- /dev/null
++++ b/apps/arcs-mini/radio/Kconfig
+@@ -0,0 +1,9 @@
++config RADIO_DEMO
++    bool "Network radio demo"
++    default n
++    depends on APP_PLAYER
++    help
++      Minimal internet-radio demo used to validate the audio path on real
++      hardware: plays a built-in MP3 station list through the shared music
++      player. Short press switches to the next station, double click pauses
++      or resumes. Not a product feature.
+diff --git a/apps/arcs-mini/radio/radio_demo.c b/apps/arcs-mini/radio/radio_demo.c
+new file mode 100644
+index 00000000..4a02d7c4
+--- /dev/null
++++ b/apps/arcs-mini/radio/radio_demo.c
+@@ -0,0 +1,154 @@
++#include "radio_demo.h"
++
++#include <string.h>
++
++#include "FreeRTOS.h"
++#include "app_player.h"
++#include "lisa_log.h"
++#include "task.h"
++#include "voice_msg.h"
++#include "voice_player_comm.h"
++
++#define TAG "radio-demo"
++
++/* 播放器会保留这个指针，直到播放结束——必须是常驻缓冲区。 */
++#define RADIO_DEMO_URL_MAX 512
++
++typedef struct {
++    const char *name;
++    const char *url;
++} radio_demo_station_t;
++
++/* 内置电台：全部是 qingting 的 MP3 直播流（Content-Type: audio/mpeg，无 Content-Length）。 */
++static const radio_demo_station_t s_stations[] = {
++    { "中国之声", "http://lhttp.qingting.fm/live/15318317/64k.mp3" },
++    { "第一财经", "http://lhttp.qingting.fm/live/276/64k.mp3" },
++    { "怀旧音乐", "http://lhttp.qingting.fm/live/4804/64k.mp3" },
++};
++
++#define RADIO_DEMO_STATION_COUNT (sizeof(s_stations) / sizeof(s_stations[0]))
++
++static bool s_active;
++static unsigned s_index;
++static bool s_paused;
++static char s_current_url[RADIO_DEMO_URL_MAX];
++
++static const char *state_name(app_player_state_t state)
++{
++    switch (state) {
++    case APP_PLAYER_STATE_IDLE: return "idle";
++    case APP_PLAYER_STATE_PREPARING: return "preparing";
++    case APP_PLAYER_STATE_PREPARED: return "prepared";
++    case APP_PLAYER_STATE_PLAYING: return "playing";
++    case APP_PLAYER_STATE_PAUSED: return "paused";
++    case APP_PLAYER_STATE_STOPPED: return "stopped";
++    case APP_PLAYER_STATE_ERROR: return "error";
++    default: return "unknown";
++    }
++}
++
++static void radio_demo_play_index(unsigned index)
++{
++    if (!music_player) {
++        LISA_LOGW(TAG, "music player unavailable, cannot play");
++        return;
++    }
++    if (index >= RADIO_DEMO_STATION_COUNT) {
++        index = 0;
++    }
++    s_index = index;
++    s_paused = false;
++
++    /* 先停掉上一路，再覆盖 URL 缓冲区（解码器可能仍持有旧指针）。 */
++    (void)app_player_stop(music_player);
++    strncpy(s_current_url, s_stations[index].url, sizeof(s_current_url) - 1);
++    s_current_url[sizeof(s_current_url) - 1] = '\0';
++
++    int ret = app_player_play(music_player, s_current_url);
++    LISA_LOGI(TAG, "play #%u %s -> %s (ret=%d)", index + 1, s_stations[index].name,
++              s_current_url, ret);
++}
++
++static void radio_demo_next(void)
++{
++    radio_demo_play_index((s_index + 1) % RADIO_DEMO_STATION_COUNT);
++}
++
++static void radio_demo_toggle_pause(void)
++{
++    if (!music_player) {
++        return;
++    }
++    app_player_state_t state = app_player_get_state(music_player);
++    if (s_paused || state == APP_PLAYER_STATE_PAUSED) {
++        s_paused = false;
++        (void)app_player_resume(music_player);
++        LISA_LOGI(TAG, "resume #%u %s", s_index + 1, s_stations[s_index].name);
++    } else {
++        s_paused = true;
++        (void)app_player_pause(music_player);
++        LISA_LOGI(TAG, "pause #%u %s", s_index + 1, s_stations[s_index].name);
++    }
++}
++
++/* 轮询播放状态并只在变化时打日志：串口/ADB 日志是验证"直播流是否真的播起来"的主要手段。 */
++static void radio_demo_monitor_task(void *argument)
++{
++    (void)argument;
++    app_player_state_t last = APP_PLAYER_STATE_IDLE;
++    for (;;) {
++        vTaskDelay(pdMS_TO_TICKS(2000));
++        if (!s_active || !music_player) {
++            continue;
++        }
++        app_player_state_t state = app_player_get_state(music_player);
++        if (state != last) {
++            LISA_LOGI(TAG, "state %s -> %s", state_name(last), state_name(state));
++            last = state;
++        }
++    }
++}
++
++int radio_demo_init(void)
++{
++    if (s_active) {
++        return 0;
++    }
++    if (!music_player) {
++        LISA_LOGE(TAG, "music player not ready; radio demo disabled");
++        return -1;
++    }
++
++    LISA_LOGI(TAG, "radio demo starting with %u stations",
++              (unsigned)RADIO_DEMO_STATION_COUNT);
++    s_active = true;
++    radio_demo_play_index(0);
++
++    if (xTaskCreate(radio_demo_monitor_task, "radio.mon", 2048, NULL, 3, NULL) != pdPASS) {
++        LISA_LOGW(TAG, "monitor task create failed; playback still works");
++    }
++    return 0;
++}
++
++bool radio_demo_is_active(void)
++{
++    return s_active;
++}
++
++bool radio_demo_handle_button(int action)
++{
++    if (!s_active) {
++        return false;
++    }
++    switch (action) {
++    case VOICE_MSG_BUTTON_ACTION_CLICK:
++        radio_demo_next();
++        return true;
++    case VOICE_MSG_BUTTON_ACTION_DOUBLE_CLICK:
++        radio_demo_toggle_pause();
++        return true;
++    default:
++        /* 长按等交给系统处理（退出 / 开关机）。 */
++        return false;
++    }
++}
+diff --git a/apps/arcs-mini/radio/radio_demo.h b/apps/arcs-mini/radio/radio_demo.h
+new file mode 100644
+index 00000000..f8f7577a
+--- /dev/null
++++ b/apps/arcs-mini/radio/radio_demo.h
+@@ -0,0 +1,35 @@
++/*
++ * radio_demo —— 最小可用的网络收音机 Demo（ARCS SDK 路线）
++ *
++ * 目的：验证"设备能不能播网络电台的直播流"，并验证按键映射。
++ * 不是产品代码：电台清单写死三个，没有设置菜单。
++ *
++ * 交互（功能键）：
++ *   短按   → 下一个电台
++ *   双击   → 暂停 / 继续
++ *   长按   → 交给系统（退出/关机），Demo 不拦截
++ *
++ * 实现要点：
++ *   - 复用 voice_player_comm 已创建并托管音频焦点的 music_player 通道
++ *     （优先级最低、被抢占时 PAUSE，语音播报结束后会自动续播）。
++ *   - 底层解码器会保留 URL 指针，所以播放地址必须放在常驻缓冲区里。
++ *   - 单独起一个任务轮询播放状态并打日志，便于通过串口/ADB 日志判断成败。
++ */
++
++#ifndef ARCS_MINI_RADIO_DEMO_H
++#define ARCS_MINI_RADIO_DEMO_H
++
++#include <stdbool.h>
++
++/* 启动 Demo：注册按键接管并开始播放第一个电台。
++ * 返回 0 成功，负数失败（播放器不可用等）。 */
++int radio_demo_init(void);
++
++/* 按键事件入口。返回 true 表示该事件已被 Demo 消费，调用方不要再处理。
++ * action 取自 voice_msg_button_action_e（CLICK / DOUBLE_CLICK 等）。 */
++bool radio_demo_handle_button(int action);
++
++/* 当前是否由 Demo 接管按键（未初始化或播放器不可用时为 false）。 */
++bool radio_demo_is_active(void);
++
++#endif /* ARCS_MINI_RADIO_DEMO_H */

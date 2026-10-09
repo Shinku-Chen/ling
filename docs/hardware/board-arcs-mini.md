@@ -1,3 +1,17 @@
+> ⚠️ **先确认板型**：`arcs_mini` 与 `arcs_mini3` 是**两块不同的板**，SoC、引脚、boot/ap 镜像都不同。
+>
+> | 项 | `arcs_mini` | **`arcs_mini3`** |
+> |---|---|---|
+> | SoC | LS2684 | **LS2663** |
+> | 构建 | `-DBOARD=arcs_mini` | **`-DBOARD=arcs_mini3`** |
+> | 资源目录 | `res/arcs-mini/` | **`res/arcs-mini3/`**（tone / wake_word / emoji / respak 共用 mini 的） |
+> | CP 日志 | uart1 = PB02 | **uart0 = PA02(RX)/PA03(TX)** |
+> | AP 日志 | uart0 = PA02/PA03 | uart1 = PB02 |
+> | 外部/烧录串口 | PB02（uart2_txd） | **UART2 = PB06/PB07** |
+>
+> **刷错板型的现象是：黑屏 + USB 不识别 + 反复重启**（2026-10-02 实测，排了一整天）。
+> 本工作区当前设备是 **arcs_mini3**。
+
 # Arcs-mini（LS26）硬件事实
 
 > 来源标注：`[官方-开发板]` = 聆思文档中心《Arcs-Mini 开发板》；`[官方-芯片]` = 聆思文档中心《LS26系列芯片介绍》；

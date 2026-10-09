@@ -41,7 +41,7 @@
 ## 4. 上真机（adb）
 
 ```powershell
-.\tools\upload.ps1 -Id timer -Serial <serial>   # 多台设备时必须指定；只有一台时可省略
+.\tools\upload.ps1 -Id radio -Serial <serial>   # 多台设备时必须指定；只有一台时可省略
 .\tools\pull.ps1   -Serial <serial>             # adb pull /miniapp/miniapp.lua → dist\device-app.lua
 ```
 

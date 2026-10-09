@@ -1,13 +1,24 @@
-# 收音机实现方案（ARCS SDK 路线）
+# 收音机实现方案
 
 目标：把 [leo-radio](https://github.com/leo0183/leo-radio) 的能力做到 Arcs-mini 上，**要有声音**。
 
-## 1. 路线决策（2026-10-02 定）
+> ## 2026-10-02 更新：小应用路线已验证可行，并已实现
+>
+> - 固件带上 `CONFIG_MINIAPP_AUDIO`（见 [`../../firmware/README.md`](../../firmware/README.md)）后，
+>   **Lua 小应用可以用 `audio.play(url)` 播放网络直播流**。实测：连续播放 **33 秒**、状态全程 `playing`、零错误
+>   （探针 [`../../examples/radio-probe.lua`](../../examples/radio-probe.lua)，结果从设备存档 `kv get blob` 读回）。
+>   → 此前最大的未知数"无限直播流能不能稳定播"**已打消**。
+> - **当前采用的是小应用路线**：`src/` 就是网络电台小应用（`stations.lua` 电台清单 + `app.lua` 界面与交互）。
+> - 固件内实现（ARCS SDK）保留为备选：`apps/arcs-mini/radio/radio_demo.c`（`CONFIG_RADIO_DEMO`，
+>   开机自动播台、短按换台、双击暂停/继续）。不需要改 SDK，也不需要上游 MR。
+> - 前提：设备必须跑**带音频接口的固件**；官方原版固件的小应用没有音频 API（见下表）。
+
+## 1. 两条路线的能力对比
 
 | 方案 | 能否出声 | 结论 |
 |---|---|---|
-| LingClaw 小应用（Lua） | ❌ 官方 API 只有 `buzzer.play(hz,ms)` 与 `tts.speak(text)`，**没有任何播放音频流的接口** | 只能做"无声收音机"，放弃 |
-| **ARCS SDK 固件内实现（C）** | ✅ `player_mgr_play()` / `app_player_play()` 是现成的，SDK 自带 MP3 解码与 HTTP 流 | **采用** |
+| LingClaw 小应用（Lua） | 官方固件 ❌；**带 `CONFIG_MINIAPP_AUDIO` 的固件 ✅（实测通过）** | **采用**（`src/` 即实现） |
+| ARCS SDK 固件内实现（C） | ✅ `player_mgr_play()` / `app_player_play()` 现成可用 | 备选（已实现 demo） |
 
 选固件的额外好处：**不需要改 SDK、不需要给上游提 MR**（当年的"给 Lua 加音频接口"补丁另存为
 [`../../firmware/miniapp-audio.patch`](../../firmware/miniapp-audio.patch)，暂缓）。

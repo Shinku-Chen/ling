@@ -1,7 +1,7 @@
-# ling — Arcs-mini 小应用工作区
+# ling — Arcs-mini3 小应用工作区
 
-用 Lua 为**聆思 Arcs-mini（LS26）**写 LingClaw 小应用：在电脑上模拟调试，用 adb 推到设备上跑，
-再按平台流程下发到设备。
+用 Lua 为**聆思 Arcs-mini3（LS26 / LS2663）**写 LingClaw 小应用：在电脑上模拟调试，用 adb 推到设备上跑。
+当前主应用是**网络电台**（`src/`）：单击换台、双击进设置菜单并暂停、长按退出。
 
 ## 三条链路
 
@@ -40,6 +40,9 @@ examples/      最小可运行示例
 - 运行时没有 `require`，多文件必须合并成单文件；产物上限 64 KiB。
 - 沙箱里没有 `pcall`，参数非法会直接终止应用，必须防御式编程。
 - 设备固件 `3.0.2` 的小应用 API 版本为 4（`screen` / `led` / `buzzer` / `clock` / `storage` / `http` / `json` / `tts`）。
+- **音频播放**（`audio.play/stop/pause/resume/state`）官方固件没有，需要固件带 `CONFIG_MINIAPP_AUDIO`
+  （见 [`firmware/README.md`](firmware/README.md)；当前设备上的 mini3 固件已包含，实测可连续播直播流）。
+- 构建与烧录必须用 **`arcs_mini3`** 板型，不要用 `arcs_mini`（两者 SoC 与引脚不同，刷错会黑屏 + USB 不识别）。
 
 ## 文档
 

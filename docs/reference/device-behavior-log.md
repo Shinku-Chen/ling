@@ -2,6 +2,28 @@
 
 记录的是**实测观察 + 源码依据**，不是推断。未解释清楚的部分明确标注为"待验证"。
 
+## 0. 最重要的教训：板型刷错（已定位）
+
+**现象**：黑屏 + USB 在系统里完全消失（连 `VID_0483` 都没有）+ 反复重启进 ADB + `adb push` 报 `connect failed: closed`。
+
+**根因**：我们把 **`arcs_mini`（LS2684）** 的固件刷到了 **`arcs_mini3`（LS2663）** 的设备上。两者是不同的板型：SoC 不同、引脚不同、`boot.bin`/`ap.bin` 也不是同一份。
+
+**修复**：按正确板型重建并重烧。
+
+```bash
+cmake -B build-mini3 -G Ninja -S apps/arcs-mini -DBOARD=arcs_mini3
+cskburn -C arcs -b 921600 -s COM9 --verify-all \
+  0x0      res/arcs-mini3/boot.bin \
+  0x40000  res/arcs-mini3/ap.bin \
+  0x600000 build-mini3/arcs-mini.bin
+```
+
+烧完重启后 **USB、ADB、小应用推送、屏幕全部恢复正常**。
+
+> ⚠️ 下面第 1～5 节的观察都是真实测量值，但它们描述的"症状"里有一部分其实源自这个刷错板型；
+> 尤其第 3 节（sync 通道故障）与第 2 节（halt peer core）在换回正确板型后不再出现。
+> 保留原文是为了记录当时的判断过程与可复现的测量方法（那段"黑屏=休眠"的源码结论本身仍然成立）。
+
 ## 1. 黑屏 + ADB 掉线：空闲休眠（hibernate）
 
 **源码依据**（`apps-ui/apps/llm/presenters/home_presenter.c:594`，官方固件仓库）：

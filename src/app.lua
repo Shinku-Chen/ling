@@ -1,117 +1,288 @@
--- app：专注计时器（小应用基础框架示例）
--- 演示：screen 绘制、按键单击/双击/三击、led、buzzer、storage 存档、tts 播报
--- 运行前请先读 docs/development/miniapp-runtime.md；改动后跑 tools/validate.ps1。
+-- app：网络电台小应用
+--   单击   → 换下一个电台
+--   双击   → 进设置菜单，并暂停播放
+--   长按   → 退出小应用（系统行为，脚本不处理）
+-- 依赖固件的 audio 接口（audio.play/stop/pause/resume/state）；接口不存在时界面会提示。
 
-local APP_TITLE = "专注计时"
-local PRESETS = { 1, 5, 15, 25 }   -- 分钟档位
+local SCREEN_PLAYER = 1
+local SCREEN_MENU = 2
 
-local BG     = 0x101820
-local FG     = 0xFFFFFF
-local MUTED  = 0x6C7A89
+local BG = 0x101820
+local FG = 0xFFFFFF
+local MUTED = 0x6C7A89
 local ACCENT = 0x55DDCC
-local TRACK  = 0x24313C
+local WARN = 0xFFB020
+local TRACK = 0x24313C
+local SEL_BG = 0x1E3730
 
-local BAR_Y   = 150
-local BAR_H   = 6
-local BAR_PAD = 24
+local SLEEP_CHOICES_MIN = { 0, 15, 30, 60 } -- 睡眠定时档位（分钟），0 = 关闭
+local MAX_MENU_ROWS = 5                     -- 菜单一屏最多显示几行（screen 每帧上限 8 段文字）
 
 local state = {
-    preset = 1,
-    left_ms = 0,
-    running = false,
-    finished = false,
+    screen = SCREEN_PLAYER,
+    index = 1,
+    menu = 1,
+    paused = false,
+    sleep_choice = 1,
+    sleep_left_ms = 0,
+    sleep_fired = false,
+    audio_state = "idle",
+    err = "-",
+    t_ms = 0,
 }
 
-local function preset_ms()
-    return PRESETS[state.preset] * 60 * 1000
+local function audio_ready()
+    return audio ~= nil and audio.play ~= nil
 end
 
-local function reset_clock()
-    state.left_ms = preset_ms()
-    state.running = false
-    state.finished = false
-    if led ~= nil and led.off ~= nil then
-        led.off("status")
-    end
+local function state_text(s)
+    if s == nil then return "未知" end
+    if s == "playing" then return "播放中" end
+    if s == "paused" then return "已暂停" end
+    if s == "preparing" or s == "prepared" then return "连接中" end
+    if s == "stopped" then return "已停止" end
+    if s == "error" then return "播放失败" end
+    if s == "unavailable" then return "无音频接口" end
+    return "待机"
 end
 
-local function fmt_ms(ms)
+local function fmt_seconds(ms)
     local total = math.floor((ms + 999) / 1000)
-    if total < 0 then
-        total = 0
-    end
-    return string.format("%02d:%02d", math.floor(total / 60), total % 60)
+    if total < 0 then total = 0 end
+    return string.format("%d:%02d", math.floor(total / 60), total % 60)
 end
 
-local function draw()
-    if screen == nil then
+--------------------------------------------------------------------------
+-- 播放控制
+--------------------------------------------------------------------------
+
+local function play_index(index)
+    local station, norm = stations.get(index)
+    state.index = norm
+    state.paused = false
+    state.sleep_fired = false
+    if station == nil then
+        state.err = "无电台"
         return
     end
+    if not audio_ready() then
+        state.audio_state = "unavailable"
+        state.err = "固件无音频接口"
+        return
+    end
+    state.plays = (state.plays or 0) + 1
+    audio.play(station.url)
+end
+
+local function next_station()
+    play_index(state.index + 1)
+end
+
+local function set_paused(paused)
+    if not audio_ready() then return end
+    if paused then
+        audio.pause()
+        state.paused = true
+    else
+        audio.resume()
+        state.paused = false
+    end
+end
+
+--------------------------------------------------------------------------
+-- 设置菜单
+--------------------------------------------------------------------------
+
+local function menu_items()
+    local items = {}
+    for i = 1, stations.count() do
+        local st = stations.get(i)
+        items[#items + 1] = { kind = "station", index = i, label = st and st.name or "电台" }
+    end
+    local sleep_label = "睡眠定时：" .. (SLEEP_CHOICES_MIN[state.sleep_choice] == 0 and "关" or
+        (SLEEP_CHOICES_MIN[state.sleep_choice] .. " 分钟"))
+    items[#items + 1] = { kind = "sleep", label = sleep_label }
+    items[#items + 1] = { kind = "resume", label = "继续播放" }
+    return items
+end
+
+local function clamp_menu()
+    local items = menu_items()
+    local n = #items
+    if n == 0 then
+        state.menu = 1
+    elseif state.menu > n then
+        state.menu = n
+    elseif state.menu < 1 then
+        state.menu = 1
+    end
+end
+
+local function enter_menu()
+    state.screen = SCREEN_MENU
+    clamp_menu()
+    set_paused(true) -- 需求：双击进设置菜单的同时暂停播放
+    draw()
+end
+
+local function leave_menu(play_again)
+    state.screen = SCREEN_PLAYER
+    if play_again and not state.sleep_fired then
+        set_paused(false)
+    end
+    draw()
+end
+
+local function menu_confirm()
+    local items = menu_items()
+    local item = items[state.menu]
+    if item == nil then
+        leave_menu(true)
+        return
+    end
+    if item.kind == "station" then
+        play_index(item.index)
+        state.screen = SCREEN_PLAYER
+        draw()
+    elseif item.kind == "sleep" then
+        state.sleep_choice = state.sleep_choice % #SLEEP_CHOICES_MIN + 1
+        local minutes = SLEEP_CHOICES_MIN[state.sleep_choice]
+        state.sleep_left_ms = minutes * 60 * 1000
+        store.set("sleep_choice", state.sleep_choice)
+        draw()
+    else
+        leave_menu(true)
+    end
+end
+
+--------------------------------------------------------------------------
+-- 绘制
+--------------------------------------------------------------------------
+
+local function draw_player()
+    local station = stations.get(state.index)
     ui.begin(BG)
-    ui.text(APP_TITLE, 12, 12, MUTED)
-    ui.text_center(fmt_ms(state.left_ms), 92, state.finished and ACCENT or FG)
+    ui.text("网络电台", 10, 6, MUTED)
 
-    local total = preset_ms()
-    local ratio = 0
-    if total > 0 then
-        ratio = 1 - (state.left_ms / total)
-    end
-    ui.progress(BAR_PAD, BAR_Y, ui.W - BAR_PAD * 2, BAR_H, ratio, ACCENT, TRACK)
+    ui.text_center(stations.short_name(station), 34, FG)
 
-    local hint = "单击开始"
-    if state.finished then
-        hint = "双击重置"
-    elseif state.running then
-        hint = "单击暂停 · 长按退出"
+    local state_color = ACCENT
+    if state.audio_state == "error" or state.audio_state == "unavailable" then
+        state_color = WARN
     end
-    ui.text_center(hint, ui.H - 40, MUTED)
-    ui.text_center(string.format("档位 %d 分钟 · 三击切换", PRESETS[state.preset]), ui.H - 24, MUTED)
+    ui.text_center(state_text(state.audio_state), 60, state_color)
+
+    local count = stations.count()
+    ui.text_center(state.index .. " / " .. count .. (state.paused and "  ·  已暂停" or ""), 84, MUTED)
+
+    -- 调谐刻度：一条横轴 + 每个电台一个刻度 + 当前台的指针
+    local x0, x1, y = 24, ui.W - 24, 128
+    local span = x1 - x0
+    ui.rect(x0, y, span, 3, TRACK)
+    if count > 1 then
+        for k = 0, count - 1 do
+            local x = math.floor(x0 + span * k / (count - 1))
+            ui.rect(x - 1, y - 5, 2, 13, MUTED)
+        end
+        local mx = math.floor(x0 + span * (state.index - 1) / (count - 1))
+        ui.rect(mx - 2, y - 9, 5, 21, ACCENT)
+    else
+        ui.rect(x0, y - 9, span, 21, ACCENT)
+    end
+
+    if state.sleep_left_ms > 0 then
+        ui.text_center("睡眠定时 " .. fmt_seconds(state.sleep_left_ms), 158, MUTED)
+    elseif state.err ~= "-" then
+        ui.text_center(state.err, 158, MUTED)
+    end
+
+    ui.text_center("单击换台  双击设置  长按退出", ui.H - 20, MUTED)
     ui.present()
 end
 
-local function alert()
-    if buzzer ~= nil and buzzer.play ~= nil then
-        buzzer.play(1200, 200)
-        buzzer.play(1600, 320)
-    end
-    if led ~= nil and led.blink ~= nil then
-        led.blink("status", 120, 120)
-    end
-    speak.say("时间到，休息一下吧")
-end
+local function draw_menu()
+    local items = menu_items()
+    ui.begin(BG)
+    ui.text("设置", 10, 6, MUTED)
 
-local function on_single_click()
-    if state.finished then
-        reset_clock()
-    else
-        state.running = not state.running
-        if not state.running and led ~= nil and led.off ~= nil then
-            led.off("status")
+    -- 只渲染选中项附近的若干行，避免超出每帧文字数量上限
+    local first = 1
+    if state.menu > MAX_MENU_ROWS then
+        first = state.menu - MAX_MENU_ROWS + 1
+    end
+    local row = 0
+    for i = first, math.min(#items, first + MAX_MENU_ROWS - 1) do
+        local y = 36 + row * 22
+        if i == state.menu then
+            ui.rect(8, y - 3, ui.W - 16, 19, SEL_BG)
         end
+        ui.text(items[i].label, 16, y, i == state.menu and FG or MUTED)
+        row = row + 1
     end
-    draw()
+
+    ui.text_center("单击选择 · 双击确认", ui.H - 20, MUTED)
+    ui.present()
 end
 
-local function on_double_click()
-    reset_clock()
-    draw()
+function draw()
+    if screen == nil then
+        return
+    end
+    if state.screen == SCREEN_MENU then
+        draw_menu()
+    else
+        draw_player()
+    end
 end
 
-local function on_triple_click()
-    state.preset = state.preset % #PRESETS + 1
-    store.set("preset", state.preset)
-    reset_clock()
-    draw()
+--------------------------------------------------------------------------
+-- 输入
+--------------------------------------------------------------------------
+
+local function on_single()
+    if state.screen == SCREEN_MENU then
+        local items = menu_items()
+        state.menu = state.menu % math.max(#items, 1) + 1
+        clamp_menu()
+        draw()
+    else
+        next_station()
+        draw()
+    end
 end
+
+local function on_double()
+    if state.screen == SCREEN_MENU then
+        menu_confirm()
+    else
+        enter_menu()
+    end
+end
+
+local function on_triple()
+    -- 三击：直接回到播放界面（方便从菜单里退出）
+    if state.screen == SCREEN_MENU then
+        leave_menu(true)
+    end
+end
+
+--------------------------------------------------------------------------
+-- 生命周期
+--------------------------------------------------------------------------
 
 function on_start()
     store.load()
-    local saved = store.get("preset", 1)
-    if type(saved) == "number" and saved >= 1 and saved <= #PRESETS then
-        state.preset = math.floor(saved)
+    local saved = store.get("station", 1)
+    if type(saved) == "number" and saved >= 1 then
+        state.index = math.floor(saved)
     end
-    input.bind(on_single_click, on_double_click, on_triple_click)
-    reset_clock()
+    local sleep_saved = store.get("sleep_choice", 1)
+    if type(sleep_saved) == "number" and sleep_saved >= 1 and sleep_saved <= #SLEEP_CHOICES_MIN then
+        state.sleep_choice = math.floor(sleep_saved)
+    end
+
+    input.bind(on_single, on_double, on_triple)
+    play_index(state.index)
     draw()
 end
 
@@ -119,36 +290,43 @@ function on_tick(dt_ms)
     if type(dt_ms) ~= "number" or dt_ms <= 0 then
         dt_ms = 20
     end
+    state.t_ms = state.t_ms + dt_ms
     input.tick(dt_ms)
     store.tick(dt_ms)
 
-    if state.running then
-        state.left_ms = state.left_ms - dt_ms
-        if state.left_ms <= 0 then
-            state.left_ms = 0
-            state.running = false
-            state.finished = true
-            alert()
+    -- 播放状态跟踪（只读取，不重绘整屏）
+    if audio ~= nil and audio.state ~= nil then
+        local now = audio.state()
+        if now ~= state.audio_state then
+            state.audio_state = now
+            draw()
         end
-        draw()
+    end
+
+    -- 睡眠定时
+    if state.sleep_left_ms > 0 then
+        state.sleep_left_ms = state.sleep_left_ms - dt_ms
+        if state.sleep_left_ms <= 0 then
+            state.sleep_left_ms = 0
+            state.sleep_fired = true
+            if audio_ready() then
+                audio.stop()
+            end
+            draw()
+        end
+    end
+
+    -- 持久化（store 内部按 ≥10 秒节流）
+    if state.index ~= store.get("station", -1) then
+        store.set("station", state.index)
     end
 end
 
-function on_button_click(button_id)
-    input.button(button_id)
-end
-
-function on_http_response(request_id, response)
-    net.on_response(request_id, response)
-end
-
-function on_tts_result(speech_id, result)
-    speak.on_result(speech_id, result)
-end
-
 function on_exit()
-    -- 退出时尽量落盘；失败（rate_limited 等）属正常，存档本身是可丢失数据
+    if audio_ready() then
+        audio.stop()
+    end
+    store.set("station", state.index)
+    store.set("sleep_choice", state.sleep_choice)
     store.flush(true)
-    net.cancel_all()
-    speak.cancel()
 end
