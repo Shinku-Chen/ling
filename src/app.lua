@@ -31,7 +31,7 @@ local C_RED = 0xFF5D62
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
 local METER_COUNT = 18   -- kMeterCount
-local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 13, 64, 214, 69
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 13, 66, 214, 69
 local METER_X, METER_Y, METER_W, METER_H = 13, 140, 214, 49
 
 local state = {
@@ -181,9 +181,10 @@ end
 -- 绘制
 --------------------------------------------------------------------------
 
--- 顶栏：LEO RADIO / 时钟 / 电量轮廓 / WiFi 条 / 分隔线（原版 12,10 + 100,7 + 195,11 + 178.. + 12,37）
+-- 顶栏：CH 编号（左上，按用户要求代替原版的 LEO RADIO 品牌字）/ 时钟 / 电量轮廓 / WiFi 条 / 分隔线
 local function draw_header()
-    ui.text("LEO RADIO", 12, 4, C_AMBER)
+    ui.text("CH " .. string.format("%02d", state.index) .. " / " ..
+        string.format("%02d", stations.count()), 12, 4, C_AMBER)
 
     local cs = clock_text()
     ui.text(cs, 190 - ui.text_width(cs), 3, C_TEXT)
@@ -242,15 +243,14 @@ local function draw_player()
     ui.begin(C_BG)
     draw_header()
 
-    -- CH 编号 + 频率读数（原版读数在刻度盘面板内右下；这里并到同一行以节省文字额度）
-    local freq = station and stations.format_frequency(station.freq or 0) or ""
-    local ch = "CH " .. string.format("%02d", state.index) .. " / " ..
-        string.format("%02d", stations.count())
-    if freq ~= "" then ch = ch .. "    FM" .. freq end
-    ui.text(ch, 13, 30, C_AMBER)
-
     -- 台名（原版用大字体居中）
-    ui.text_center(ui.truncate(station and station.name or "无电台", 48), 48, C_TEXT)
+    ui.text_center(ui.truncate(station and station.name or "无电台", 48), 28, C_TEXT)
+
+    -- 描述行（原版 12,105 居中）；频率有解析结果时并入这一行
+    local desc = station and tostring(station.desc or "") or ""
+    local freq = station and stations.format_frequency(station.freq or 0) or ""
+    if freq ~= "" then desc = "FM" .. freq .. " · " .. desc end
+    ui.text_center(ui.truncate(desc, 48), 48, C_MUTED)
 
     -- 刻度盘面板：圆角 8 + 1px 边框（原版 radius 8 / 边框 kGrid）
     ui.round_rect(DIAL_X, DIAL_Y, DIAL_W, DIAL_H, 8, C_GRID, 2)
@@ -267,17 +267,14 @@ local function draw_player()
     local playing = (state.audio_state == "playing") and not state.paused
     draw_meter(playing)
 
-    -- 播放图标 + 状态行（原版 13,270 / 39,272）
-    draw_play_icon(13, 195, playing)
+    -- 播放图标 + 状态行（原版 13,270 / 39,272；本机整体上移）
+    draw_play_icon(13, 193, playing)
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
     end
-    if state.online then
-        status = status .. "   " .. state.city_display
-    end
     if state.err ~= "-" then status = state.err end
-    ui.text(ui.truncate(status, 50), 34, 198, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    ui.text(ui.truncate(status, 50), 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
