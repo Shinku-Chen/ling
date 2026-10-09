@@ -11,6 +11,8 @@ local DEFAULT_H = 240
 ui.W = app and app.width or DEFAULT_W
 ui.H = app and app.height or DEFAULT_H
 ui.LINE_H = 16
+-- 实测：设备 16px 字号的墨迹比行盒中心低约 4px，统一上移补偿，使"居中"真的居中
+ui.TEXT_DY = -4
 
 -- 单段文字上限（字节），来自运行时契约
 ui.MAX_TEXT_BYTES = 63
@@ -118,6 +120,7 @@ end
 
 -- 文本：截断到 63 字节并夹紧 y（运行时要求 y ≤ height - 16）
 function ui.text(text, x, y, rgb)
+    y = y + (ui.TEXT_DY or 0)
     if not screen then
         return
     end
