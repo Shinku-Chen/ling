@@ -42,6 +42,7 @@ local state = {
     city_sel = 1,
     paused = false,
     sleep_choice = 1,
+    last_draw_ms = 0,
     sleep_left_ms = 0,
     audio_state = "idle",
     err = "-",
@@ -481,14 +482,24 @@ function on_tick(dt_ms)
     store.tick(dt_ms)
     dial.tick(dt_ms)
 
-    if state.screen == SCREEN_PLAYER or dial.animating() or state.searching then
-        draw()
+    -- 重绘节流：原来每 tick 全屏重绘（一秒几十次、每次 ~120 矩形）会把 CPU 吃光，
+    -- 与音频解码/网络抢资源，表现为按键后几秒才响应。播放页降到 ~8fps，
+    -- 动画（刻度盘/搜索）~16fps，都靠 state.last_draw_ms 统一控制。
+    do
+        local iv = 0
+        if state.screen == SCREEN_PLAYER then iv = 120 end
+        if dial.animating() or state.searching then iv = 60 end
+        if iv > 0 and (state.t_ms - state.last_draw_ms) >= iv then
+            state.last_draw_ms = state.t_ms
+            draw()
+        end
     end
 
     if audio ~= nil and audio.state ~= nil then
         local now = audio.state()
         if now ~= state.audio_state then
             state.audio_state = now
+            state.last_draw_ms = state.t_ms
             draw()
         end
     end
