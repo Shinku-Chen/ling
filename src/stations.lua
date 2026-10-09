@@ -15,7 +15,7 @@ stations.builtin = {
 
 -- 城市表（与 leo-radio 的 kCityChoices 一致；query 为 nil 表示自动定位）
 stations.cities = {
-    { query = nil, display = "自动定位" },
+    { query = nil, display = "内置电台" },
     { query = "北京", display = "北京" },
     { query = "上海", display = "上海" },
     { query = "广州", display = "广州" },

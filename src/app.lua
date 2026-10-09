@@ -30,7 +30,7 @@ local C_RED = 0xFF5D62
 
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local VOLUME_STEPS = { 0, 20, 40, 60, 80, 100 }   -- 音量档位（单击循环）
-local ROWS = 7   -- 列表区 34..214、行距 26px，正好容纳 7 行（原来 5 行底部空两行）
+local ROWS = 6   -- 列表每帧文字数 = 标题 1 + 行数 + 底部提示 1，必须 ≤ 8 → 行数最多 6
 local METER_COUNT = 18   -- kMeterCount
 local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 78, 196, 54
 local METER_X, METER_Y, METER_W, METER_H = 13, 138, 214, 46
@@ -178,6 +178,17 @@ local function start_search(city_index)
     if city == nil then return end
     state.city_sel = city_index
     if city.query == nil then
+        -- 「内置电台」：不联网，直接用内置 6 台（默认档）
+        stations.reset()
+        state.online = false
+        state.city_display = "内置"
+        state.searching = false
+        state.pending_search = false
+        state.pending_detect = false
+        draw()
+        return
+    end
+    if false then
         -- 「自动定位」档：用 IP 定位到的城市名查询（未定位到则用北京）
         state.city_query = state.detect_city or "北京"
         state.city_display = state.city_query
@@ -541,10 +552,14 @@ function on_start()
     end
 
     -- 每次开机：按上次保存的城市重新搜索在线电台列表（等 Wi-Fi 起来再发）
+    state.pending_detect = false         -- IP 定位已按要求关闭
     if state.city_sel == 1 then
-        state.pending_detect = true      -- 「自动定位」档：先查当前城市，再搜电台
+        -- 默认「内置电台」：开机直接用内置 6 台，不联网
+        stations.reset()
+        state.online = false
+        state.city_display = "内置"
     else
-        state.pending_search = true
+        state.pending_search = true      -- 用户选过地区：开机拉该地区在线列表
     end
 
     input.bind(on_single, on_double, on_triple)
