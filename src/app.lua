@@ -187,21 +187,21 @@ local function draw_header()
         string.format("%02d", stations.count()), 12, 4, C_AMBER)
 
     local cs = clock_text()
-    ui.text_center(cs, 3, C_TEXT)
+    ui.text_vcenter(cs, (ui.W - ui.text_width(cs)) / 2, 12, C_TEXT)
 
-    -- 电量：小应用没有电池接口，只画轮廓（原版在此显示百分比）
-    ui.rect(199, 4, 22, 10, C_BG)
-    ui.rect(199, 4, 22, 1, C_MUTED)
-    ui.rect(199, 13, 22, 1, C_MUTED)
-    ui.rect(199, 5, 1, 8, C_MUTED)
-    ui.rect(220, 5, 1, 8, C_MUTED)
-    ui.rect(221, 7, 2, 4, C_MUTED)
+    -- 电量：小应用没有电池接口，只画轮廓；与顶栏文字同一垂直中心（cy=12）
+    ui.rect(199, 7, 22, 10, C_BG)
+    ui.rect(199, 7, 22, 1, C_MUTED)
+    ui.rect(199, 16, 22, 1, C_MUTED)
+    ui.rect(199, 8, 1, 8, C_MUTED)
+    ui.rect(220, 8, 1, 8, C_MUTED)
+    ui.rect(221, 10, 2, 4, C_MUTED)
 
     -- WiFi 条：原版联网时绿色、否则暗；这里用"是否正在播放"推断连通
     local online = (state.audio_state == "playing") or (not state.paused and state.online)
     for i = 0, 2 do
         local h = 3 + i * 3
-        ui.rect(176 + i * 5, 16 - h, 3, h, online and C_GREEN or C_MUTED)
+        ui.rect(176 + i * 5, 18 - h, 3, h, online and C_GREEN or C_MUTED)   -- 底边对齐 cy+6
     end
 
     ui.rect(12, 24, 216, 1, C_GRID)
@@ -266,16 +266,17 @@ local function draw_player()
     draw_meter(playing)
 
     -- 播放图标 + 状态行（原版 13,270 / 39,272；本机整体上移）
+    -- 状态行：图标与文字共用垂直中心 cy=182（图标 12px、文字 16px）
     draw_play_icon(13, 176, playing)
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
     end
     if state.err ~= "-" then status = state.err end
-    ui.text(ui.truncate(status, 40), 34, 179, state.err ~= "-" and C_RED or state_color(state.audio_state))
-    -- 右侧：位置（城市）右对齐，与状态同一行
+    ui.text_vcenter(ui.truncate(status, 40), 34, 182, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    -- 右侧：位置（城市）右对齐，与状态同一垂直中心
     local city = tostring(state.city_display or "内置")
-    ui.text(city, ui.W - 14 - ui.text_width(city), 179, C_AMBER)
+    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 182, C_AMBER)
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
@@ -291,7 +292,7 @@ local source_footer = ""
 
 local function draw_list_rows(items, selected, label_of, empty_hint)
     ui.begin(C_BG)
-    ui.text(ui.truncate(source_title, 48), 12, 6, C_AMBER)
+    ui.text_vcenter(ui.truncate(source_title, 48), 12, 14, C_AMBER)
     ui.rect(12, 24, 216, 1, C_GRID)
 
     if #items == 0 then
@@ -303,8 +304,8 @@ local function draw_list_rows(items, selected, label_of, empty_hint)
         for i = first, math.min(#items, first + ROWS - 1) do
             local y = 34 + row * 26
             local sel = (i == selected)
-            ui.round_rect(10, y - 4, 220, 23, 6, sel and C_PANEL_SOFT or C_PANEL, 2)
-            ui.rect(14, y - 2, 3, 19, sel and C_AMBER or C_GRID)
+            ui.round_rect(10, y - 4, 220, 24, 6, sel and C_PANEL_SOFT or C_PANEL, 2)
+            ui.rect(14, y - 2, 3, 20, sel and C_AMBER or C_GRID)
             ui.text(ui.truncate(label_of(items[i]), 48), 22, y, sel and C_TEXT or C_MUTED)
             row = row + 1
         end

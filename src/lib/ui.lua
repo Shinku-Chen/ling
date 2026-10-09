@@ -142,37 +142,43 @@ function ui.text(text, x, y, rgb)
     screen.text(s, x, y, rgb or 0xFFFFFF)
 end
 
--- 圆角矩形：用阶梯矩形逼近 LVGL 的 radius（小应用只能画矩形）
--- steps 越大越接近真圆角，默认 3 段
-function ui.round_rect(x, y, w, h, r, rgb, steps)
+-- 圆角矩形：按圆弧逐行内缩（1px 一行），角是真圆，不会出现阶梯位移
+function ui.round_rect(x, y, w, h, r, rgb)
     if not screen then return end
     r = math.floor(r or 0)
-    steps = steps or 3
     if r <= 0 then
         ui.rect(x, y, w, h, rgb)
         return
     end
     if r * 2 > w then r = math.floor(w / 2) end
     if r * 2 > h then r = math.floor(h / 2) end
-    -- 主体（十字形）
-    ui.rect(x + r, y, w - 2 * r, h, rgb)
-    ui.rect(x, y + r, r, h - 2 * r, rgb)
-    ui.rect(x + w - r, y + r, r, h - 2 * r, rgb)
-    -- 四个角：按阶梯向内收
-    local step_h = math.max(1, math.floor(r / steps))
-    for i = 0, steps - 1 do
-        local ry = y + i * step_h
-        local inset = r - math.floor(r * (i + 1) / steps)
-        local rh = step_h
-        if i == steps - 1 then rh = r - i * step_h end
-        ui.rect(x + inset, ry, r - inset, rh, rgb)
-        ui.rect(x + w - r, ry, r - inset, rh, rgb)
-        local by = y + h - (i + 1) * step_h
-        local bh = step_h
-        if i == steps - 1 then bh = r - i * step_h end
-        ui.rect(x + inset, by, r - inset, bh, rgb)
-        ui.rect(x + w - r, by, r - inset, bh, rgb)
+    ui.rect(x + r, y, w - 2 * r, h, rgb)          -- 中段
+    ui.rect(x, y + r, r, h - 2 * r, rgb)          -- 左中
+    ui.rect(x + w - r, y + r, r, h - 2 * r, rgb)  -- 右中
+    -- 2px 一档：视觉上仍是圆弧，但矩形数减半（小应用每帧上限 128 个）
+    local i = 0
+    while i < r do
+        local bh = 2
+        if i + bh > r then bh = r - i end
+        local dy = r - i - 0.5
+        local inset = r - math.floor(math.sqrt(r * r - dy * dy) + 0.5)
+        if inset < 0 then inset = 0 end
+        local len = r - inset
+        ui.rect(x + inset, y + i, len, bh, rgb)
+        ui.rect(x + w - r, y + i, len, bh, rgb)
+        ui.rect(x + inset, y + h - i - bh, len, bh, rgb)
+        ui.rect(x + w - r, y + h - i - bh, len, bh, rgb)
+        i = i + bh
     end
+end
+
+-- 垂直居中绘制：cy 是文字行的垂直中心（行高 16）
+function ui.text_vcenter(text, x, cy, rgb)
+    ui.text(text, x, math.floor(cy - ui.LINE_H / 2), rgb)
+end
+
+function ui.text_center_v(text, cy, rgb)
+    ui.text_center(text, math.floor(cy - ui.LINE_H / 2), rgb)
 end
 
 -- 居中绘制（按估算宽度）

@@ -17,7 +17,7 @@
 param(
     [string]$Serial = '',
     [string]$Out = 'dist\device.bmp',
-    [int]$ChunkBytes = 1024
+    [int]$ChunkBytes = 256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +57,7 @@ Write-Host ("[shot] header: {0}x{1} RGB565 {2} 字节（分块 {3} 字节）" -f
 $data = [byte[]]::new($total)
 $filled = 0
 $start = 0
+$attempts = 0
 while ($start -lt $total) {
     $len = [Math]::Min($ChunkBytes, $total - $start)
     $resp = & $adb -s $Serial shell shot $start $len 2>&1
@@ -69,19 +70,27 @@ while ($start -lt $total) {
             break
         }
         foreach ($chunk in ($t -split '\s+')) {
+            if ($hex.Length -ge $len * 2) { break }
             if ($chunk -match '^[0-9a-fA-F]+$' -and $chunk.Length % 2 -eq 0) { [void]$hex.Append($chunk) }
         }
+        if ($hex.Length -ge $len * 2) { break }
     }
-    $got = $hex.Length / 2
-    if (-not $ok -or $got -ne $len) {
-        # 丢包就换更小的块重试一次
+    $got = [Math]::Min($hex.Length / 2, $len)   # 多余字节截断（流可能粘连）
+    if ($got -lt $len) {
+        # 丢字节：先降块重试，再对同一块重试若干次（串口/ADB 输出偶发丢包）
+        $attempts++
         if ($ChunkBytes -gt 256) {
             Write-Host ("[shot] 第 {0} 块不完整（{1}/{2}），改用 256 字节块重试" -f $start, $got, $len)
             $ChunkBytes = 256
             continue
         }
-        throw ("第 {0} 块拉取不完整（收到 {1}/{2}）" -f $start, $got, $len)
+        if ($attempts -le 6) {
+            Write-Host ("[shot] 第 {0} 块重试 #{1}（上轮 {2}/{3}）" -f $start, $attempts, $got, $len)
+            continue
+        }
+        throw ("第 {0} 块拉取不完整（重试 {1} 次仍为 {2}/{3}）" -f $start, $attempts, $got, $len)
     }
+    $attempts = 0
     for ($i = 0; $i -lt $len; $i++) {
         $data[$start + $i] = [Convert]::ToByte($hex.ToString().Substring($i * 2, 2), 16)
     }
