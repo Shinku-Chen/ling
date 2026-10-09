@@ -31,8 +31,8 @@ local C_RED = 0xFF5D62
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
 local METER_COUNT = 18   -- kMeterCount
-local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 64, 196, 54
-local METER_X, METER_Y, METER_W, METER_H = 13, 124, 214, 46
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 72, 196, 54
+local METER_X, METER_Y, METER_W, METER_H = 13, 132, 214, 46
 
 local state = {
     screen = SCREEN_PLAYER,
@@ -268,16 +268,16 @@ local function draw_player()
 
     -- 播放图标 + 状态行（原版 13,270 / 39,272；本机整体上移）
     -- 状态行：图标与文字共用垂直中心 cy=182（图标 12px、文字 16px）
-    draw_play_icon(13, 176, playing)
+    draw_play_icon(13, 184, playing)
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
     end
     if state.err ~= "-" then status = state.err end
-    ui.text_vcenter(ui.truncate(status, 40), 34, 182, state.err ~= "-" and C_RED or state_color(state.audio_state))
+    ui.text_vcenter(ui.truncate(status, 40), 34, 190, state.err ~= "-" and C_RED or state_color(state.audio_state))
     -- 右侧：位置（城市）右对齐，与状态同一垂直中心
     local city = tostring(state.city_display or "内置")
-    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 182, C_AMBER)
+    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 190, C_AMBER)
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
