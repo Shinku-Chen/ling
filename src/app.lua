@@ -208,20 +208,20 @@ local function draw_header()
     ui.rect(220, 8, 1, 8, C_MUTED)
     ui.rect(221, 10, 2, 4, C_MUTED)
     if pct ~= nil then
-        local fw = math.floor(18 * pct / 100 + 0.5)   -- 内腔 200..217，按百分比实心填充
+        local fw = math.floor(20 * pct / 100 + 0.5)   -- 内腔 200..219 共 20px   -- 内腔 200..217，按百分比实心填充
         if pct > 0 and fw < 1 then fw = 1 end
         if fw > 0 then
             ui.rect(200, 9, fw, 6, charging and C_GREEN or (pct <= 15 and C_RED or C_AMBER))
         end
         local txt = pct .. "%"
-        ui.text(196 - ui.text_width(txt), 4, charging and C_GREEN or C_MUTED)
+        ui.text(172 - ui.text_width(txt), 4, charging and C_GREEN or C_MUTED)
     end
 
     -- WiFi 条：原版联网时绿色、否则暗；这里用"是否正在播放"推断连通
     local online = (state.audio_state == "playing") or (not state.paused and state.online)
     for i = 0, 2 do
         local h = 3 + i * 3
-        ui.rect(146 + i * 5, 18 - h, 3, h, online and C_GREEN or C_MUTED)   -- 左移给电量百分比让位   -- 底边对齐 cy+6
+        ui.rect(176 + i * 5, 18 - h, 3, h, online and C_GREEN or C_MUTED)   -- 左移给电量百分比让位   -- 底边对齐 cy+6
     end
 
     ui.rect(12, 24, 216, 1, C_GRID)
