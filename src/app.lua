@@ -29,6 +29,7 @@ local C_GREEN = 0x4ED39A
 local C_RED = 0xFF5D62
 
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
+local VOLUME_STEPS = { 0, 20, 40, 60, 80, 100 }   -- 音量档位（单击循环）
 local ROWS = 7   -- 列表区 34..214、行距 26px，正好容纳 7 行（原来 5 行底部空两行）
 local METER_COUNT = 18   -- kMeterCount
 local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 78, 196, 54
@@ -41,6 +42,7 @@ local state = {
     list_sel = 1,
     city_sel = 1,
     pending_search = false,   -- 开机自动按上次城市重搜在线电台
+    volume_choice = 4,        -- 音量档位索引（默认 80）
     paused = false,
     sleep_choice = 1,
     last_draw_ms = 0,
@@ -350,6 +352,7 @@ local function menu_items()
     return {
         { kind = "list", label = "电台列表" },
         { kind = "city", label = "城市：" .. state.city_display },
+        { kind = "volume", label = "音量：" .. tostring(VOLUME_STEPS[state.volume_choice]) },
         { kind = "sleep", label = "睡眠定时：" .. (SLEEP_MINUTES[state.sleep_choice] == 0 and "关" or (SLEEP_MINUTES[state.sleep_choice] .. " 分钟")) },
         { kind = "reset", label = "恢复内置电台" },
         { kind = "resume", label = "继续播放" },
@@ -428,6 +431,12 @@ local function menu_confirm()
     elseif item.kind == "city" then
         state.screen = SCREEN_CITY
         draw()
+    elseif item.kind == "volume" then
+        state.volume_choice = state.volume_choice % #VOLUME_STEPS + 1
+        if type(audio) == "table" and type(audio.set_volume) == "function" then
+            audio.set_volume(VOLUME_STEPS[state.volume_choice])
+        end
+        store.set("volume_choice", state.volume_choice)
     elseif item.kind == "sleep" then
         state.sleep_choice = state.sleep_choice % #SLEEP_MINUTES + 1
         state.sleep_left_ms = SLEEP_MINUTES[state.sleep_choice] * 60 * 1000
@@ -489,6 +498,13 @@ function on_start()
     store.load()
     local saved = store.get("station", 1)
     if type(saved) == "number" and saved >= 1 then state.index = math.floor(saved) end
+    local volume_saved = store.get("volume_choice", 4)
+    if type(volume_saved) == "number" and volume_saved >= 1 and volume_saved <= #VOLUME_STEPS then
+        state.volume_choice = math.floor(volume_saved)
+    end
+    if type(audio) == "table" and type(audio.set_volume) == "function" then
+        audio.set_volume(VOLUME_STEPS[state.volume_choice])
+    end
     local sleep_saved = store.get("sleep_choice", 1)
     if type(sleep_saved) == "number" and sleep_saved >= 1 and sleep_saved <= #SLEEP_MINUTES then
         state.sleep_choice = math.floor(sleep_saved)
