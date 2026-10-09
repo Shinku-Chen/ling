@@ -190,19 +190,38 @@ local function draw_header()
     local cs = clock_text()
     ui.text_vcenter(cs, (ui.W - ui.text_width(cs)) / 2, 12, C_TEXT)
 
-    -- 电量：小应用没有电池接口，只画轮廓；与顶栏文字同一垂直中心（cy=12）
+    -- 电量：固件新增 power.battery()（ADC 实读）；取不到则退化为只画轮廓
+    local pct, charging = nil, false
+    if type(power) == "table" and type(power.battery) == "function" then
+        local b = power.battery()
+        if type(b) == "table" and type(b.percent) == "number" then
+            pct = math.floor(b.percent + 0.5)
+            if pct < 0 then pct = 0 end
+            if pct > 100 then pct = 100 end
+            charging = (b.charging == true)
+        end
+    end
     ui.rect(199, 7, 22, 10, C_BG)
     ui.rect(199, 7, 22, 1, C_MUTED)
     ui.rect(199, 16, 22, 1, C_MUTED)
     ui.rect(199, 8, 1, 8, C_MUTED)
     ui.rect(220, 8, 1, 8, C_MUTED)
     ui.rect(221, 10, 2, 4, C_MUTED)
+    if pct ~= nil then
+        local fw = math.floor(18 * pct / 100 + 0.5)   -- 内腔 200..217，按百分比实心填充
+        if pct > 0 and fw < 1 then fw = 1 end
+        if fw > 0 then
+            ui.rect(200, 9, fw, 6, charging and C_GREEN or (pct <= 15 and C_RED or C_AMBER))
+        end
+        local txt = pct .. "%"
+        ui.text(196 - ui.text_width(txt), 4, charging and C_GREEN or C_MUTED)
+    end
 
     -- WiFi 条：原版联网时绿色、否则暗；这里用"是否正在播放"推断连通
     local online = (state.audio_state == "playing") or (not state.paused and state.online)
     for i = 0, 2 do
         local h = 3 + i * 3
-        ui.rect(176 + i * 5, 18 - h, 3, h, online and C_GREEN or C_MUTED)   -- 底边对齐 cy+6
+        ui.rect(146 + i * 5, 18 - h, 3, h, online and C_GREEN or C_MUTED)   -- 左移给电量百分比让位   -- 底边对齐 cy+6
     end
 
     ui.rect(12, 24, 216, 1, C_GRID)
@@ -274,10 +293,19 @@ local function draw_player()
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
     end
     if state.err ~= "-" then status = state.err end
-    ui.text_vcenter(ui.truncate(status, 40), 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
-    -- 右侧：位置（城市）右对齐，与状态同一垂直中心
+    -- 状态 + 城市合成一段文字：沙箱静态限制每帧 ≤8 段文字，原来已占 7 段，
+    -- 电量百分比要用掉 1 段，所以把这两段（同处一行）合并，靠空格把城市顶到右对齐位置。
     local city = tostring(state.city_display or "内置")
-    ui.text_vcenter(city, ui.W - 14 - ui.text_width(city), 196, C_AMBER)
+    local body = ui.truncate(status, 40)
+    local sw = ui.text_width(" ")
+    local gap = ui.W - 14 - 34 - ui.text_width(body) - ui.text_width(city)
+    local n = 1
+    if sw > 0 then n = math.floor(gap / sw) end
+    if n < 1 then n = 1 end
+    if n > 15 then n = 15 end
+    local pad = ""
+    for i = 1, n do pad = pad .. " " end
+    ui.text_vcenter(body .. pad .. city, 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
 
     ui.rect(12, 214, 216, 1, C_GRID)
     ui.text_center("单击换台  双击设置  长按退出", 220, C_MUTED)
