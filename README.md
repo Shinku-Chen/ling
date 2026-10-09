@@ -25,11 +25,48 @@
 .\tools\upload.ps1 -Id timer
 ```
 
+## 串口复位（复位后自动进入小应用）
+
+```powershell
+# 默认 COM9 @ 921600（设备 CH340 串口）
+powershell -NoProfile -File tools/reset-device.ps1
+
+# 指定串口 / 波特率 / 复位保持时长
+powershell -NoProfile -File tools/reset-device.ps1 -Port COM7 -Baud 921600 -HoldMs 250
+```
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `-Port` | `COM9` | 串口号 |
+| `-Baud` | `921600` | 波特率（仅用于打开串口，本脚本不传数据） |
+| `-HoldMs` | `250` | RTS 拉低时长（复位保持时间），一般不需要改 |
+
+**信号极性**（实测确定，别试错）：
+
+| 信号 | 电平 | 含义 |
+|---|---|---|
+| DTR | 保持**高** | 正常运行；**拉低会进 ROM 烧录模式** ✗ |
+| RTS | 高 → **低（HoldMs）** → 高 | 空闲 → 复位 → 释放启动 ✔ |
+
+**原理**：小应用运行时会持续把「热启动意图」写入 AON 寄存器（bit 21）。AON 域跨复位保持，
+boot 读到该位就跳过「长按功能键开机」的等待，直接启动应用（约 5~10 秒后 adb 可见）。
+
+**生效范围**：
+
+| 场景 | 自动进业务 |
+|---|---|
+| 软件重启（`adb shell reboot`） | ✅ |
+| 串口 RTS 复位（本脚本） | ✅ |
+| cskburn 刷机后的复位 | ❌ 需按一次功能键 |
+| 完全断电冷启动（拔 USB） | ❌ 需长按功能键（原厂防误触设计） |
+
+详见 `docs/reference/device-behavior-log.md`。
+
 ## 目录
 
 ```text
 src/           小应用源码（bundle.conf 决定合并顺序，产物 dist/app.lua）
-tools/         build / validate / upload / pull / screenshot
+tools/         build / validate / upload / pull / screenshot / reset-device
 docs/          硬件、运行时契约、开发流程、云端边界、外部资料索引
 examples/      最小可运行示例
 ```
