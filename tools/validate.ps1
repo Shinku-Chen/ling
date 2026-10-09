@@ -92,6 +92,13 @@ if ($text -match 'function\s+on_tick\s*\(') {
     $staticFailures += '缺少必需的 on_tick 回调'
 }
 
+# 用到按键输入时，必须把运行时的 on_button_click 转接进来（漏写会导致“按键无反应”）
+if (($text -match 'input\.button\s*\(') -and ($text -notmatch 'function\s+on_button_click\s*\(')) {
+    $staticFailures += '调用了 input.button() 但没有定义 on_button_click 回调（按键会无反应）'
+} else {
+    Write-Host '[static] button callback      PASS'
+}
+
 if ($Id -ne '') {
     if ($Id -match '^[A-Za-z0-9_-]{1,121}$') {
         Write-Host ("[static] app id {0}        PASS" -f $Id)
