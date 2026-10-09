@@ -176,8 +176,25 @@ stations.reset()
 --------------------------------------------------------------------------
 
 -- 与 leo-radio 一致的查询参数：中国 + MP3 + 隐藏坏源 + 按点击量排序
+-- 城市名是中文，必须按 UTF-8 逐字节百分号编码后才能放进 URL
+function stations.url_encode(text)
+    if type(text) ~= "string" then return "" end
+    local out = {}
+    for i = 1, #text do
+        local b = string.byte(text, i)
+        local ch = string.sub(text, i, i)
+        if (b >= 48 and b <= 57) or (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or
+           ch == "-" or ch == "_" or ch == "." or ch == "~" then
+            out[#out + 1] = ch
+        else
+            out[#out + 1] = string.format("%%%02X", b)
+        end
+    end
+    return table.concat(out)
+end
+
 function stations.search_url(city)
-    local query = city or "北京"
+    local query = stations.url_encode(city or "北京")
     return stations.DIRECTORY .. "?countrycode=CN&name=" .. query ..
         "&codec=MP3&hidebroken=true&order=clickcount&reverse=true&limit=" .. stations.MAX_ONLINE
 end
