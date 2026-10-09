@@ -40,6 +40,7 @@ local state = {
     menu = 1,
     list_sel = 1,
     city_sel = 1,
+    pending_search = false,   -- 开机自动按上次城市重搜在线电台
     paused = false,
     sleep_choice = 1,
     last_draw_ms = 0,
@@ -498,6 +499,9 @@ function on_start()
         state.city_display = stations.cities[state.city_sel].display
     end
 
+    -- 每次开机：按上次保存的城市重新搜索在线电台列表（等 Wi-Fi 起来再发）
+    state.pending_search = true
+
     input.bind(on_single, on_double, on_triple)
     play_index(state.index)
     draw()
@@ -530,6 +534,11 @@ function on_tick(dt_ms)
             state.last_draw_ms = state.t_ms
             draw()
         end
+    end
+
+    if state.pending_search and not state.searching and state.t_ms > 3000 then
+        state.pending_search = false
+        if net.available() then start_search(state.city_sel) end
     end
 
     if state.searching and (state.t_ms - state.search_started_ms) > 25000 then
