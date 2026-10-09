@@ -55,6 +55,9 @@ end
 --------------------------------------------------------------------------
 
 function dial.move_to(x, animate)
+    -- 按用户要求：指针直接跳动到位，不做缓动动画（同时 animating() 恒为 false，
+    -- 应用不再为动画做 16fps 重绘，顺带省 CPU）
+    animate = false
     x_target = x
     x_from = x_current
     anim_left_ms = animate and ANIM_MS or 0
@@ -119,10 +122,8 @@ function dial.draw()
     -- 轨道
     ui.rect(ax(TRACK_LEFT), ay(36), TRACK_RIGHT - TRACK_LEFT + 1, 2, 0x24404A)
 
-    -- 指针下方的光晕（呼吸） + 指针本体
+    -- 指针本体（按用户要求：去掉指针下方光晕/呼吸）
     local nx = math.floor(x_current)
-    local glow = 18 + math.floor(dial.pulse() * 6)
-    ui.rect(ax(nx) - glow / 2, ay(33), glow, 8, 0x7F5A29)
     ui.rect(ax(nx) - math.floor(NEEDLE_W / 2), ay(27), NEEDLE_W, 22, 0xFFB74D)
 end
 
