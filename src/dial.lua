@@ -10,8 +10,8 @@ local dial = {}
 dial.BAND_LOW = 870   -- 87.0 MHz（十分之一 MHz）
 dial.BAND_HIGH = 1080 -- 108.0 MHz
 
-local TRACK_LEFT = 16
-local TRACK_RIGHT = 198
+local TRACK_LEFT = 18
+local TRACK_RIGHT = 178
 local NEEDLE_W = 3
 local TICK_COUNT = 41
 
@@ -131,5 +131,12 @@ end
 local SCALE_LABELS = "88   92  96  100  104 108"
 
 function dial.draw_labels()
-    ui.text(SCALE_LABELS, ax(8), ay(6), 0x849BA0)
+    ui.text(SCALE_LABELS, ax(10), ay(6), 0x849BA0)
+end
+
+-- 右下角频率读数（对应原版 s_dial_readout，位置 138,47 右对齐）
+function dial.draw_readout(text, color)
+    if type(text) ~= "string" or text == "" then return end
+    local w = ui.text_width(text)
+    ui.text(text, ax(TRACK_RIGHT) - w, ay(47), color or 0xFFB74D)
 end

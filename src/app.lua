@@ -31,7 +31,7 @@ local C_RED = 0xFF5D62
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local ROWS = 5
 local METER_COUNT = 18   -- kMeterCount
-local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 13, 66, 214, 69
+local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 66, 196, 69
 local METER_X, METER_Y, METER_W, METER_H = 13, 140, 214, 49
 
 local state = {
@@ -258,8 +258,8 @@ local function draw_player()
     dial.panel_x, dial.panel_y = DIAL_X, DIAL_Y
     dial.draw()
     dial.draw_labels()
-    -- 面板内左下角的位置文字（原版 s_location 在 dial 的 8,47）
-    ui.text(ui.truncate(state.city_display or "内置", 18), DIAL_X + 8, DIAL_Y + 47, C_AMBER)
+    -- 面板右下角：本台频率读数（原版 s_dial_readout 的位置）
+    dial.draw_readout(freq ~= "" and ("FM" .. freq) or "", C_AMBER)
 
     -- 电平条面板：圆角 7
     ui.round_rect(METER_X, METER_Y, METER_W, METER_H, 7, C_PANEL_SOFT, 2)
@@ -272,6 +272,8 @@ local function draw_player()
     local status = state_text(state.audio_state)
     if state.sleep_left_ms > 0 then
         status = status .. "   定时 " .. fmt_mmss(state.sleep_left_ms)
+    else
+        status = status .. "   " .. (state.city_display or "内置")   -- 位置并入状态行（按用户要求）
     end
     if state.err ~= "-" then status = state.err end
     ui.text(ui.truncate(status, 50), 34, 196, state.err ~= "-" and C_RED or state_color(state.audio_state))
