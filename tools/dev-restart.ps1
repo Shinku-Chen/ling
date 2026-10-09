@@ -18,12 +18,19 @@ param(
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 
-Write-Host "[dev] 1/4 串口复位（$Port）"
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "reset-device.ps1") -Port $Port
-
-Write-Host "[dev] 2/4 等待 adb 出现（最多 $WaitSeconds 秒；首次刷机后需长按功能键）"
 $adb = Join-Path $root ".tools/platform-tools/adb.exe"
 $env:MSYS_NO_PATHCONV = "1"
+$visible = ((& $adb devices 2>$null) | Select-Object -Skip 1 | Where-Object { $_ -match "	device" })
+if ($visible) {
+  # 软件重启：不触碰硬件电源/复位线，实测 6 秒即可回到业务（串口 RTS 复位有时会把板子留在关机态）
+  Write-Host "[dev] 1/4 软件重启（adb shell reboot）"
+  & $adb -s $Serial shell reboot 2>&1 | Out-Null
+} else {
+  Write-Host "[dev] 1/4 adb 不可见 → 串口复位（$Port）"
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "reset-device.ps1") -Port $Port
+}
+
+Write-Host "[dev] 2/4 等待 adb 出现（最多 $WaitSeconds 秒；首次刷机后需长按功能键）"
 $t = 0
 while ($t -lt $WaitSeconds) {
   Start-Sleep -Seconds 3; $t += 3
