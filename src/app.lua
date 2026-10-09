@@ -30,6 +30,7 @@ local C_RED = 0xFF5D62
 
 local SLEEP_MINUTES = { 0, 15, 30, 60, 90 }
 local VOLUME_STEPS = { 0, 20, 40, 60, 80, 100 }   -- 音量档位（单击循环）
+local MINIAPP_IP_LOCATE = false                    -- IP 定位开关（按用户要求关闭）
 local ROWS = 6   -- 列表每帧文字数 = 标题 1 + 行数 + 底部提示 1，必须 ≤ 8 → 行数最多 6
 local METER_COUNT = 18   -- kMeterCount
 local DIAL_X, DIAL_Y, DIAL_W, DIAL_H = 22, 78, 196, 54
@@ -251,8 +252,10 @@ local function draw_header()
         if fw > 0 then
             ui.rect(200, 8, fw, 8, charging and C_GREEN or (pct <= 15 and C_RED or C_AMBER))   -- 填满内腔 8..15
         end
-        local txt = pct .. "%"
-        ui.text(172 - ui.text_width(txt), 4, charging and C_GREEN or C_MUTED)
+        -- 电量只用「实心填充」表示，不显示百分比文字：
+        -- 曾用 ui.text(172 - ui.text_width(pct .. "%"), 4, ...) 绘制，
+        -- 但 text_width 对「数字+%」混合串返回值不可靠，x 会越界导致文字被画到屏幕另一端（实测跑到左下角）；
+        -- 按用户要求保持现状（只填充、无数字）。若将来要加回，请用固定 x，不要做宽度运算。
     end
 
     -- WiFi 条：原版联网时绿色、否则暗；这里用"是否正在播放"推断连通
@@ -596,7 +599,9 @@ function on_tick(dt_ms)
         end
     end
 
-    if false and state.pending_detect and state.t_ms > 3000 then   -- TODO: IP 定位崩溃待修（见 docs）
+    -- IP 定位：按用户要求关闭（默认内置电台；只有选择地区才联网）。
+    -- 之前开启时会导致小应用被终止，原因未定位完，恢复前需先修该崩溃。
+    if MINIAPP_IP_LOCATE and state.pending_detect and state.t_ms > 3000 then
         state.pending_detect = false
         if net.available() then
             local id = net.get_json("http://ip-api.com/json/?lang=zh-CN", on_detect_done,
