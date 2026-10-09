@@ -42,6 +42,9 @@ local state = {
     list_sel = 1,
     city_sel = 1,
     pending_search = false,   -- 开机自动按上次城市重搜在线电台
+    pending_detect = false,   -- 开机先做 IP 定位（「自动定位」档）
+    detect_city = nil,        -- IP 定位到的城市名
+    city_query = nil,         -- 实际用于搜索的城市名
     volume_choice = 4,        -- 音量档位索引（默认 80）
     paused = false,
     sleep_choice = 1,
@@ -156,11 +159,33 @@ local function on_search_done(data, err)
     store.flush(true)
 end
 
+-- IP 定位结果（用于「自动定位」档）：ip-api.com 返回 { city, regionName, ... }
+local function on_detect_done(data, err)
+    local city = nil
+    if type(data) == "table" then
+        city = data.city or data.regionName
+        if type(city) ~= "string" or #city == 0 then city = nil end
+    end
+    if city == nil then city = "北京" end          -- 定位失败退回北京
+    state.detect_city = city
+    state.city_display = city
+    state.pending_search = true                    -- 定位完成后再搜电台
+    state.last_draw_ms = state.t_ms
+    draw()
+end
+
 local function start_search(city_index)
     local city = stations.cities[city_index]
     if city == nil then return end
     state.city_sel = city_index
-    state.city_display = city.display
+    if city.query == nil then
+        -- 「自动定位」档：用 IP 定位到的城市名查询（未定位到则用北京）
+        state.city_query = state.detect_city or "北京"
+        state.city_display = state.city_query
+    else
+        state.city_query = city.query
+        state.city_display = city.display
+    end
     if not net.available() then
         state.err = "无网络接口"
         draw()
@@ -172,7 +197,7 @@ local function start_search(city_index)
     draw()
 
     -- 请求可能同步失败（URL 非法 / 无网络）：必须判返回值，否则 searching 会永远卡住
-    local id, err = net.get_json(stations.search_url(city.query or "北京"), on_search_done,
+    local id, err = net.get_json(stations.search_url(state.city_query or "北京"), on_search_done,
         { max_response_bytes = 32768, timeout_ms = 15000 })
     if id == nil then
         state.searching = false
@@ -516,7 +541,11 @@ function on_start()
     end
 
     -- 每次开机：按上次保存的城市重新搜索在线电台列表（等 Wi-Fi 起来再发）
-    state.pending_search = true
+    if state.city_sel == 1 then
+        state.pending_detect = true      -- 「自动定位」档：先查当前城市，再搜电台
+    else
+        state.pending_search = true
+    end
 
     input.bind(on_single, on_double, on_triple)
     play_index(state.index)
@@ -549,6 +578,17 @@ function on_tick(dt_ms)
             state.audio_state = now
             state.last_draw_ms = state.t_ms
             draw()
+        end
+    end
+
+    if state.pending_detect and state.t_ms > 3000 then
+        state.pending_detect = false
+        if net.available() then
+            local id = net.get_json("http://ip-api.com/json/?lang=zh-CN", on_detect_done,
+                { max_response_bytes = 4096, timeout_ms = 8000 })
+            if id == nil then state.pending_search = true end     -- 发射失败就直接搜（用北京）
+        else
+            state.pending_search = true
         end
     end
 
