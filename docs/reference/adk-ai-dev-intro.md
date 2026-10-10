@@ -1,0 +1,42 @@
+# ADK（聆思 AI 辅助开发套件）参考
+
+- **官方文档**：https://docs2.listenai.com/zh/VibeCoding/AI辅助开发介绍
+- **文档标题**：AI辅助开发介绍 | 聆思文档中心
+- **检索方式**：`ling wiki search ADK`（CLI 内置的文档中心检索）
+- **抓取日期**：2026-10-10
+- **抓取限制**：docs2 是 SPA（VuePress），正文需浏览器渲染，脚本只能拿到页面 meta 文本。
+  以下为 meta/SEO 文本中可确认的原文，**完整正文请用浏览器打开上面的链接**。
+
+## 原文（页面 meta 可确认部分）
+
+> 
+
+关键词（页面 meta keywords）：
+
+## 进一步确认到的关键事实
+
+从文档中心检索与页面文本可确认：
+
+- ADK = **AI Development Kit**（AI 辅助开发套件），属于聆思的 **VibeCoding / AI 辅助开发** 体系。
+- 体系由三部分组成：
+  1. **Skill：ling** —— 面向 AI 编程助手的技能包，为端云交互开发工作流固化最佳实践，
+     为编程助手提供端云全链路开发指引。
+  2. **设备端 ADK** —— 面向嵌入式开发（内置 coding、device 等能力）。
+  3. **云侧 ADK** —— 面向云侧业务开发。
+- 定位：**开发者只需描述需求，就能完成端侧固件和云侧服务的开发、部署与验证。**
+
+## 相关文档（来自 `ling wiki search`）
+
+| 文档 | 链接 |
+|---|---|
+| AI辅助开发介绍（本文） | https://docs2.listenai.com/zh/VibeCoding/AI辅助开发介绍 |
+| 视频教程 | https://docs2.listenai.com/zh/VibeCoding/视频教程 |
+
+## 与本仓库工作方式的关系
+
+本项目当前的工作方式是"**AI 驱动 + 自建工具链**"：产物是小应用（Lua）与定向固件补丁，
+用自建工具做验证（`tools/validate.ps1`、`tools/screenshot-device.ps1`、`tools/screen-analyze.py`、
+`tools/dev-restart.ps1`），发布走社区小应用机制、固件走上游 MR。
+
+与 ADK 的关系：**理念一致（描述需求 → 开发 → 部署 → 验证），落点不同**
+（ADK 面向标准端侧固件/云侧服务；本项目面向社区小应用 + 定向固件接口）。
